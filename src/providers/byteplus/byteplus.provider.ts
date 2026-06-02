@@ -11,16 +11,16 @@ import { Capability, GenerationOutput } from '../../common/generation.types';
  *   - Video generation (async):  POST {base}/contents/generations/tasks
  *                                GET  {base}/contents/generations/tasks/{id}
  *
- * Configure via env (see .env.example):
- *   GENERATION_PROVIDER=byteplus
- *   BYTEPLUS_API_KEY=...                 (from console.byteplus.com/ark)
- *   BYTEPLUS_ENDPOINT=https://ark.ap-southeast.bytepluses.com/api/v3
- *   BYTEPLUS_VIDEO_MODEL=<your Seedance model / endpoint id>
- *   BYTEPLUS_IMAGE_MODEL=<your image model / endpoint id>
+ * Verified against the ModelArk API:
+ *   video model: seedance-1-0-pro-fast-251015 (params via --flags in the text)
+ *   image model: seedream-5-0-260128
+ * Both are env-overridable (BYTEPLUS_VIDEO_MODEL / BYTEPLUS_IMAGE_MODEL); only
+ * BYTEPLUS_API_KEY is required.
  *
- * NOTE: the regional endpoint, exact model ids, and the Seedance parameter
- * flag names should be confirmed against your ModelArk console — they are all
- * env-/config-driven so no code change is needed to adjust them.
+ * IMPORTANT — image inputs: ModelArk's image_url expects a *publicly reachable*
+ * URL (e.g. object storage). A base64 data URI may be rejected. For local
+ * testing of image-to-video with an uploaded photo, the image must be hosted
+ * somewhere BytePlus can fetch (TOS upload is the planned next step).
  */
 @Injectable()
 export class ByteplusProvider implements GenerationProvider {
@@ -67,11 +67,15 @@ export class ByteplusProvider implements GenerationProvider {
     baseUrl: string,
     apiKey: string,
   ): Promise<GenerationOutput[]> {
-    const model = this.requireModel('image');
+    const model = this.resolveModel('image');
     const body: Record<string, unknown> = {
       model,
       prompt: ctx.request.prompt,
       response_format: 'url',
+      size: this.config.get<string>('BYTEPLUS_IMAGE_SIZE') ?? '2K',
+      sequential_image_generation: 'disabled',
+      watermark: false,
+      stream: false,
     };
     const imageUrl = this.firstImageUrl(ctx);
     if (imageUrl) body.image = imageUrl; // image-to-image reference
@@ -92,7 +96,7 @@ export class ByteplusProvider implements GenerationProvider {
     baseUrl: string,
     apiKey: string,
   ): Promise<GenerationOutput[]> {
-    const model = this.requireModel('video');
+    const model = this.resolveModel('video');
 
     const content: TaskContentPart[] = [
       { type: 'text', text: this.composeVideoPrompt(ctx) },
@@ -146,14 +150,17 @@ export class ByteplusProvider implements GenerationProvider {
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────
-  private requireModel(kind: 'image' | 'video'): string {
-    const key =
-      kind === 'video' ? 'BYTEPLUS_VIDEO_MODEL' : 'BYTEPLUS_IMAGE_MODEL';
-    const model = this.config.get<string>(key);
-    if (!model) {
-      throw new Error(`BytePlus ${kind} model not configured: set ${key}.`);
+  /** Model id for the kind, env-overridable; defaults to the verified ids. */
+  private resolveModel(kind: 'image' | 'video'): string {
+    if (kind === 'video') {
+      return (
+        this.config.get<string>('BYTEPLUS_VIDEO_MODEL') ??
+        'seedance-1-0-pro-fast-251015'
+      );
     }
-    return model;
+    return (
+      this.config.get<string>('BYTEPLUS_IMAGE_MODEL') ?? 'seedream-5-0-260128'
+    );
   }
 
   private firstImageUrl(ctx: GenerationContext): string | undefined {
