@@ -3,8 +3,7 @@ import { GenerationContext, GenerationProvider } from '../provider.interface';
 import { GenerationOutput } from '../../common/generation.types';
 
 /** A well-known sample video used as a placeholder result. */
-const SAMPLE_VIDEO =
-  'https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
+const SAMPLE_VIDEO = 'https://www.w3schools.com/html/mov_bbb.mp4';
 
 /**
  * Mock provider — supports every capability and returns placeholder media after
