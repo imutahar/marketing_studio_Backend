@@ -4,25 +4,37 @@ import { GenerationContext, GenerationProvider } from '../provider.interface';
 import { Capability, GenerationOutput } from '../../common/generation.types';
 
 /**
- * BytePlus (Seedance) provider — SKELETON, ready to flip on.
+ * BytePlus (ModelArk / Seedance) provider.
  *
- * To enable real generation:
- *   1. Set BYTEPLUS_API_KEY (+ BYTEPLUS_ENDPOINT / model envs).
- *   2. Set GENERATION_PROVIDER=byteplus.
- *   3. Implement the two marked API calls below (create task + poll task).
+ * Implements ModelArk's API shape:
+ *   - Image generation (sync):   POST {base}/images/generations
+ *   - Video generation (async):  POST {base}/contents/generations/tasks
+ *                                GET  {base}/contents/generations/tasks/{id}
  *
- * Until implemented it advertises support but throws a clear error, so a
- * misconfiguration is obvious rather than silent.
+ * Configure via env (see .env.example):
+ *   GENERATION_PROVIDER=byteplus
+ *   BYTEPLUS_API_KEY=...                 (from console.byteplus.com/ark)
+ *   BYTEPLUS_ENDPOINT=https://ark.ap-southeast.bytepluses.com/api/v3
+ *   BYTEPLUS_VIDEO_MODEL=<your Seedance model / endpoint id>
+ *   BYTEPLUS_IMAGE_MODEL=<your image model / endpoint id>
+ *
+ * NOTE: the regional endpoint, exact model ids, and the Seedance parameter
+ * flag names should be confirmed against your ModelArk console — they are all
+ * env-/config-driven so no code change is needed to adjust them.
  */
 @Injectable()
 export class ByteplusProvider implements GenerationProvider {
   readonly name = 'byteplus';
   private readonly logger = new Logger(ByteplusProvider.name);
 
+  private readonly defaultEndpoint =
+    'https://ark.ap-southeast.bytepluses.com/api/v3';
+  private readonly pollIntervalMs = 5000;
+  private readonly pollTimeoutMs = 10 * 60 * 1000;
+
   constructor(private readonly config: ConfigService) {}
 
   supports(capability: Capability): boolean {
-    // Seedance covers text/image → image/video.
     return (
       [
         'text-to-image',
@@ -33,38 +45,190 @@ export class ByteplusProvider implements GenerationProvider {
     ).includes(capability);
   }
 
-  generate(ctx: GenerationContext): Promise<GenerationOutput[]> {
+  async generate(ctx: GenerationContext): Promise<GenerationOutput[]> {
     const apiKey = this.config.get<string>('BYTEPLUS_API_KEY');
     if (!apiKey) {
-      return Promise.reject(
-        new Error(
-          'BytePlus provider is not configured: set BYTEPLUS_API_KEY to enable real generation.',
-        ),
+      throw new Error(
+        'BytePlus provider is not configured: set BYTEPLUS_API_KEY to enable real generation.',
       );
     }
+    const baseUrl = (
+      this.config.get<string>('BYTEPLUS_ENDPOINT') ?? this.defaultEndpoint
+    ).replace(/\/$/, '');
 
-    // const endpoint = this.config.get<string>('BYTEPLUS_ENDPOINT');
-    // const model = this.pickModel(ctx.capability);
-    //
-    // TODO(1): create a generation task
-    //   POST `${endpoint}/.../tasks`
-    //   body: { model, prompt: ctx.request.prompt, image: <ref from attachments>, ... }
-    //   → { task_id }
-    //
-    // TODO(2): poll until the task succeeds
-    //   GET `${endpoint}/.../tasks/${task_id}` until status === 'succeeded'
-    //   → map output urls to GenerationOutput[]
-    this.logger.warn(`BytePlus not implemented yet (job ${ctx.jobId}).`);
-    return Promise.reject(
-      new Error('BytePlus integration not implemented yet.'),
+    return ctx.request.mode === 'video'
+      ? this.generateVideo(ctx, baseUrl, apiKey)
+      : this.generateImage(ctx, baseUrl, apiKey);
+  }
+
+  // ── Image (synchronous) ────────────────────────────────────────────────
+  private async generateImage(
+    ctx: GenerationContext,
+    baseUrl: string,
+    apiKey: string,
+  ): Promise<GenerationOutput[]> {
+    const model = this.requireModel('image');
+    const body: Record<string, unknown> = {
+      model,
+      prompt: ctx.request.prompt,
+      response_format: 'url',
+    };
+    const imageUrl = this.firstImageUrl(ctx);
+    if (imageUrl) body.image = imageUrl; // image-to-image reference
+
+    const res = await this.post<ImageGenerationResponse>(
+      `${baseUrl}/images/generations`,
+      apiKey,
+      body,
     );
+    const url = res.data?.[0]?.url;
+    if (!url) throw new Error('BytePlus image generation returned no url.');
+    return [{ type: 'image', url }];
   }
 
-  /** Maps a capability to the BytePlus model id to use (fill in real ids). */
-  private pickModel(capability: Capability): string {
-    const isVideo = capability.endsWith('video');
-    return isVideo
-      ? (this.config.get<string>('BYTEPLUS_VIDEO_MODEL') ?? 'seedance-video')
-      : (this.config.get<string>('BYTEPLUS_IMAGE_MODEL') ?? 'seedream-image');
+  // ── Video (async task + poll) ──────────────────────────────────────────
+  private async generateVideo(
+    ctx: GenerationContext,
+    baseUrl: string,
+    apiKey: string,
+  ): Promise<GenerationOutput[]> {
+    const model = this.requireModel('video');
+
+    const content: TaskContentPart[] = [
+      { type: 'text', text: this.composeVideoPrompt(ctx) },
+    ];
+    const imageUrl = this.firstImageUrl(ctx);
+    if (imageUrl)
+      content.push({ type: 'image_url', image_url: { url: imageUrl } });
+
+    const created = await this.post<CreateTaskResponse>(
+      `${baseUrl}/contents/generations/tasks`,
+      apiKey,
+      { model, content },
+    );
+    this.logger.log(
+      `BytePlus video task ${created.id} created (job ${ctx.jobId}).`,
+    );
+
+    const videoUrl = await this.pollVideoTask(baseUrl, apiKey, created.id);
+    return [{ type: 'video', url: videoUrl }];
   }
+
+  private async pollVideoTask(
+    baseUrl: string,
+    apiKey: string,
+    taskId: string,
+  ): Promise<string> {
+    const deadline = Date.now() + this.pollTimeoutMs;
+    while (Date.now() < deadline) {
+      const task = await this.get<TaskStatusResponse>(
+        `${baseUrl}/contents/generations/tasks/${taskId}`,
+        apiKey,
+      );
+      switch (task.status) {
+        case 'succeeded':
+          if (!task.content?.video_url) {
+            throw new Error(
+              'BytePlus task succeeded but returned no video_url.',
+            );
+          }
+          return task.content.video_url;
+        case 'failed':
+        case 'cancelled':
+          throw new Error(
+            `BytePlus task ${task.status}: ${task.error?.message ?? 'no detail'}`,
+          );
+        default:
+          await delay(this.pollIntervalMs);
+      }
+    }
+    throw new Error('BytePlus video task timed out.');
+  }
+
+  // ── Helpers ──────────────────────────────────────────────────────────────
+  private requireModel(kind: 'image' | 'video'): string {
+    const key =
+      kind === 'video' ? 'BYTEPLUS_VIDEO_MODEL' : 'BYTEPLUS_IMAGE_MODEL';
+    const model = this.config.get<string>(key);
+    if (!model) {
+      throw new Error(`BytePlus ${kind} model not configured: set ${key}.`);
+    }
+    return model;
+  }
+
+  private firstImageUrl(ctx: GenerationContext): string | undefined {
+    return ctx.request.attachments.find((a) => Boolean(a.url))?.url;
+  }
+
+  /**
+   * Append recognized Seedance parameters as command flags to the prompt.
+   * Flag names follow ModelArk's text-command convention — verify against your
+   * console and adjust this single mapping if needed.
+   */
+  private composeVideoPrompt(ctx: GenerationContext): string {
+    const flags: string[] = [];
+    for (const opt of ctx.request.options) {
+      if (/^\d+s$/.test(opt)) flags.push(`--duration ${opt.replace('s', '')}`);
+      else if (/^\d+:\d+$/.test(opt)) flags.push(`--ratio ${opt}`);
+      else if (/^\d+p$/i.test(opt)) flags.push(`--resolution ${opt}`);
+    }
+    return [ctx.request.prompt, ...flags].join(' ').trim();
+  }
+
+  private async post<T>(
+    url: string,
+    apiKey: string,
+    body: unknown,
+  ): Promise<T> {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      throw new Error(
+        `BytePlus ${res.status} (POST ${url}): ${await res.text()}`,
+      );
+    }
+    return (await res.json()) as T;
+  }
+
+  private async get<T>(url: string, apiKey: string): Promise<T> {
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (!res.ok) {
+      throw new Error(
+        `BytePlus ${res.status} (GET ${url}): ${await res.text()}`,
+      );
+    }
+    return (await res.json()) as T;
+  }
+}
+
+interface CreateTaskResponse {
+  id: string;
+}
+
+interface TaskStatusResponse {
+  id: string;
+  /** e.g. queued | running | succeeded | failed | cancelled */
+  status: string;
+  content?: { video_url?: string };
+  error?: { message?: string };
+}
+
+interface ImageGenerationResponse {
+  data?: { url?: string }[];
+}
+
+type TaskContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
