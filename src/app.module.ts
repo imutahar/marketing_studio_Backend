@@ -5,6 +5,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { GenerationModule } from './generation/generation.module';
+import { UsageModule } from './usage/usage.module';
 
 @Module({
   imports: [
@@ -12,6 +13,7 @@ import { GenerationModule } from './generation/generation.module';
     // Basic abuse/cost protection: 30 requests/min per IP.
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 30 }]),
     GenerationModule,
+    UsageModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
