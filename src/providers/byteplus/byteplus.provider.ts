@@ -175,7 +175,8 @@ export class ByteplusProvider implements GenerationProvider {
   private composeVideoPrompt(ctx: GenerationContext): string {
     const flags: string[] = [];
     for (const opt of ctx.request.options) {
-      if (/^\d+s$/.test(opt)) flags.push(`--duration ${opt.replace('s', '')}`);
+      const duration = opt.match(/^(\d+)\s*(?:s|ث)$/); // "12s" or "12 ث"
+      if (duration) flags.push(`--duration ${duration[1]}`);
       else if (/^\d+:\d+$/.test(opt)) flags.push(`--ratio ${opt}`);
       else if (/^\d+p$/i.test(opt)) flags.push(`--resolution ${opt}`);
     }
