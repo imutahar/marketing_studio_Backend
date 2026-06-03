@@ -70,7 +70,7 @@ export class ByteplusProvider implements GenerationProvider {
     const model = this.resolveModel('image');
     const body: Record<string, unknown> = {
       model,
-      prompt: ctx.request.prompt,
+      prompt: this.composeImagePrompt(ctx),
       response_format: 'url',
       size: this.config.get<string>('BYTEPLUS_IMAGE_SIZE') ?? '2K',
       sequential_image_generation: 'disabled',
@@ -174,13 +174,22 @@ export class ByteplusProvider implements GenerationProvider {
    */
   private composeVideoPrompt(ctx: GenerationContext): string {
     const flags: string[] = [];
+    const descriptors: string[] = [];
     for (const opt of ctx.request.options) {
       const duration = opt.match(/^(\d+)\s*(?:s|ث)$/); // "12s" or "12 ث"
       if (duration) flags.push(`--duration ${duration[1]}`);
       else if (/^\d+:\d+$/.test(opt)) flags.push(`--ratio ${opt}`);
       else if (/^\d+p$/i.test(opt)) flags.push(`--resolution ${opt}`);
+      else descriptors.push(opt); // style descriptors, e.g. نوع الفيديو
     }
-    return [ctx.request.prompt, ...flags].join(' ').trim();
+    return [styleText(ctx.request.prompt, descriptors), ...flags]
+      .join(' ')
+      .trim();
+  }
+
+  /** Image prompt enriched with the selected options (language, format, …). */
+  private composeImagePrompt(ctx: GenerationContext): string {
+    return styleText(ctx.request.prompt, ctx.request.options);
   }
 
   private async post<T>(
@@ -239,4 +248,10 @@ type TaskContentPart =
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Append non-empty style descriptors (نوع الفيديو, language, …) to a prompt. */
+function styleText(prompt: string, descriptors: string[]): string {
+  const extras = descriptors.filter((d) => d && d.trim().length > 0);
+  return extras.length ? `${prompt} — ${extras.join('، ')}` : prompt;
 }
