@@ -10,6 +10,7 @@ import {
   Job,
   resolveCapability,
 } from '../common/generation.types';
+import { Asset } from './asset.types';
 
 const IMAGE_TOKEN_COST = 20;
 const VIDEO_TOKENS_PER_SECOND = 10;
@@ -69,6 +70,25 @@ export class GenerationService {
 
   listByProject(projectId: string): Job[] {
     return this.store.list().filter((j) => j.projectId === projectId);
+  }
+
+  /** Flatten every successful output into a global asset library, newest first. */
+  listAssets(): Asset[] {
+    const assets: Asset[] = [];
+    for (const job of this.store.list()) {
+      if (job.status !== 'succeeded') continue;
+      job.outputs.forEach((out, i) => {
+        assets.push({
+          id: `${job.id}:${i}`,
+          type: out.type,
+          url: out.url,
+          prompt: job.request.prompt,
+          projectId: job.projectId,
+          createdAt: job.createdAt,
+        });
+      });
+    }
+    return assets;
   }
 
   private async run(
