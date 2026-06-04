@@ -42,6 +42,8 @@ export interface Job {
   provider: string;
   outputs: GenerationOutput[];
   error?: string;
+  /** Optional owning project. */
+  projectId?: string;
   createdAt: string;
   updatedAt: string;
 }

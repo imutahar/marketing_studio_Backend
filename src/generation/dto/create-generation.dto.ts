@@ -38,6 +38,10 @@ export class CreateGenerationDto {
   prompt: string;
 
   @IsOptional()
+  @IsString()
+  projectId?: string;
+
+  @IsOptional()
   @IsArray()
   @IsString({ each: true })
   options?: string[];

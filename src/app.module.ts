@@ -8,6 +8,7 @@ import { GenerationModule } from './generation/generation.module';
 import { UsageModule } from './usage/usage.module';
 import { ExtractModule } from './extract/extract.module';
 import { AdReferenceModule } from './ad-reference/ad-reference.module';
+import { ProjectsModule } from './projects/projects.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { AdReferenceModule } from './ad-reference/ad-reference.module';
     UsageModule,
     ExtractModule,
     AdReferenceModule,
+    ProjectsModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],

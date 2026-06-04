@@ -45,6 +45,7 @@ export class GenerationService {
       request,
       provider: provider.name,
       outputs: [],
+      projectId: dto.projectId,
       createdAt: now,
       updatedAt: now,
     };
@@ -64,6 +65,10 @@ export class GenerationService {
 
   list(): Job[] {
     return this.store.list();
+  }
+
+  listByProject(projectId: string): Job[] {
+    return this.store.list().filter((j) => j.projectId === projectId);
   }
 
   private async run(
