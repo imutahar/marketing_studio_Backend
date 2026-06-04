@@ -6,6 +6,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { GenerationModule } from './generation/generation.module';
 import { UsageModule } from './usage/usage.module';
+import { ExtractModule } from './extract/extract.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { UsageModule } from './usage/usage.module';
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 30 }]),
     GenerationModule,
     UsageModule,
+    ExtractModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
