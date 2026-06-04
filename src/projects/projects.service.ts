@@ -1,38 +1,51 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { GenerationService } from '../generation/generation.service';
 import { CreateProjectDto, UpdateProjectDto } from './dto/projects.dto';
-import { Project, ProjectSummary } from './projects.types';
+import { Project, ProjectDetail, ProjectSummary } from './projects.types';
+
+/** Stored project = brand kit + lightweight generation counters. */
+type ProjectRecord = Project & { generationCount: number; thumbnail?: string };
 
 /**
- * Projects = per-product/campaign workspaces. Generations are tagged with a
- * projectId, so a project's summary shows its ad count + latest thumbnail.
+ * Projects = per-product/campaign workspaces with a brand kit (instructions +
+ * reference assets) the generation pipeline injects so outputs are on-brand.
  *
- * In-memory for now (seeded with a few examples); swap for a DB + per-merchant
- * scoping later.
+ * Pure in-memory store (no dependency on generation): the pipeline calls
+ * `recordGeneration` on success to keep counts/thumbnail fresh. Swap for a DB +
+ * per-merchant scoping later.
  */
 @Injectable()
 export class ProjectsService {
-  private readonly store = new Map<string, Project>();
+  private readonly store = new Map<string, ProjectRecord>();
 
-  constructor(private readonly generation: GenerationService) {
+  constructor() {
     for (const name of ['شاور جل', 'شامبو', 'شنطة سفر']) {
       const now = new Date().toISOString();
       const id = randomUUID();
-      this.store.set(id, { id, name, createdAt: now, updatedAt: now });
+      this.store.set(id, {
+        id,
+        name,
+        brandAssets: [],
+        generationCount: 0,
+        createdAt: now,
+        updatedAt: now,
+      });
     }
   }
 
-  create(dto: CreateProjectDto): ProjectSummary {
+  create(dto: CreateProjectDto): ProjectDetail {
     const now = new Date().toISOString();
-    const project: Project = {
+    const record: ProjectRecord = {
       id: randomUUID(),
       name: dto.name.trim(),
+      instructions: dto.instructions?.trim() || undefined,
+      brandAssets: dto.brandAssets ?? [],
+      generationCount: 0,
       createdAt: now,
       updatedAt: now,
     };
-    this.store.set(project.id, project);
-    return this.summarize(project);
+    this.store.set(record.id, record);
+    return this.detail(record);
   }
 
   list(): ProjectSummary[] {
@@ -41,19 +54,29 @@ export class ProjectsService {
       .map((p) => this.summarize(p));
   }
 
-  get(id: string): ProjectSummary {
-    return this.summarize(this.require(id));
+  get(id: string): ProjectDetail {
+    return this.detail(this.require(id));
   }
 
-  update(id: string, dto: UpdateProjectDto): ProjectSummary {
+  /** Project for generation context — undefined instead of throwing. */
+  tryGet(id: string): Project | undefined {
+    return this.store.get(id);
+  }
+
+  update(id: string, dto: UpdateProjectDto): ProjectDetail {
     const project = this.require(id);
-    const updated: Project = {
+    const updated: ProjectRecord = {
       ...project,
-      name: dto.name.trim(),
+      name: dto.name?.trim() ?? project.name,
+      instructions:
+        dto.instructions !== undefined
+          ? dto.instructions.trim() || undefined
+          : project.instructions,
+      brandAssets: dto.brandAssets ?? project.brandAssets,
       updatedAt: new Date().toISOString(),
     };
     this.store.set(id, updated);
-    return this.summarize(updated);
+    return this.detail(updated);
   }
 
   remove(id: string): void {
@@ -62,20 +85,44 @@ export class ProjectsService {
     }
   }
 
-  private require(id: string): Project {
+  /** Called by the generation pipeline when a project's job succeeds. */
+  recordGeneration(projectId: string, thumbnailUrl?: string): void {
+    const record = this.store.get(projectId);
+    if (!record) return;
+    record.generationCount += 1;
+    if (thumbnailUrl) record.thumbnail = thumbnailUrl;
+    this.store.set(projectId, record);
+  }
+
+  private require(id: string): ProjectRecord {
     const project = this.store.get(id);
     if (!project) throw new NotFoundException(`Project "${id}" not found.`);
     return project;
   }
 
-  private summarize(project: Project): ProjectSummary {
-    const jobs = this.generation
-      .listByProject(project.id)
-      .filter((j) => j.status === 'succeeded' && j.outputs.length > 0);
+  private summarize(p: ProjectRecord): ProjectSummary {
     return {
-      ...project,
-      generationCount: jobs.length,
-      thumbnail: jobs[0]?.outputs[0]?.url, // listByProject is newest-first
+      id: p.id,
+      name: p.name,
+      createdAt: p.createdAt,
+      updatedAt: p.updatedAt,
+      generationCount: p.generationCount,
+      thumbnail: p.thumbnail,
+      hasInstructions: Boolean(p.instructions),
+      brandAssetCount: p.brandAssets.length,
+    };
+  }
+
+  private detail(p: ProjectRecord): ProjectDetail {
+    return {
+      id: p.id,
+      name: p.name,
+      instructions: p.instructions,
+      brandAssets: p.brandAssets,
+      generationCount: p.generationCount,
+      thumbnail: p.thumbnail,
+      createdAt: p.createdAt,
+      updatedAt: p.updatedAt,
     };
   }
 }
