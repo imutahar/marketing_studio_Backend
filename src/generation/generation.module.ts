@@ -9,5 +9,6 @@ import { UsageModule } from '../usage/usage.module';
   imports: [ProvidersModule, UsageModule],
   controllers: [GenerationController],
   providers: [GenerationService, JobStore],
+  exports: [GenerationService],
 })
 export class GenerationModule {}

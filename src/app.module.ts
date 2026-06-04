@@ -7,6 +7,7 @@ import { AppService } from './app.service';
 import { GenerationModule } from './generation/generation.module';
 import { UsageModule } from './usage/usage.module';
 import { ExtractModule } from './extract/extract.module';
+import { AdReferenceModule } from './ad-reference/ad-reference.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { ExtractModule } from './extract/extract.module';
     GenerationModule,
     UsageModule,
     ExtractModule,
+    AdReferenceModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
