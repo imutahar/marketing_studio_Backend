@@ -163,8 +163,17 @@ export class ByteplusProvider implements GenerationProvider {
     );
   }
 
+  /** Prefer the product image as the reference; fall back to any attachment. */
   private firstImageUrl(ctx: GenerationContext): string | undefined {
-    return ctx.request.attachments.find((a) => Boolean(a.url))?.url;
+    const withUrl = ctx.request.attachments.filter((a) => Boolean(a.url));
+    const product = withUrl.find((a) => a.kind === 'product');
+    return (product ?? withUrl[0])?.url;
+  }
+
+  /** The selected character/avatar name, if any (kind === 'character'). */
+  private characterName(ctx: GenerationContext): string | undefined {
+    return ctx.request.attachments.find((a) => a.kind === 'character')
+      ?.fileName;
   }
 
   /**
@@ -182,6 +191,11 @@ export class ByteplusProvider implements GenerationProvider {
       else if (/^\d+p$/i.test(opt)) flags.push(`--resolution ${opt}`);
       else descriptors.push(opt); // style descriptors, e.g. نوع الفيديو
     }
+
+    // Fold the chosen character/avatar into the prompt so it shapes the video.
+    const character = this.characterName(ctx);
+    if (character) descriptors.push(`يقدّمه ${character}`);
+
     return [styleText(ctx.request.prompt, descriptors), ...flags]
       .join(' ')
       .trim();
