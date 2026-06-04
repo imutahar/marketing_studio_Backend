@@ -46,4 +46,19 @@ describe('ExtractService.parseHtml', () => {
     expect(info.title).toBe('حقيبة');
     expect(info.images[0]).toBe('https://shop.example.sa/a/b.jpg');
   });
+
+  it('falls back to <img> but skips logos/icons and ranks by size', () => {
+    const html = `<html><body>
+      <img src="/assets/logo.png" width="120" height="40" />
+      <img src="/img/small.jpg" width="50" height="50" />
+      <img src="/img/hero.jpg" width="800" height="800" />
+      <img src="/icons/visa.svg" />
+    </body></html>`;
+    const info = service.parseHtml(html, base);
+    expect(info.images[0]).toBe('https://shop.example.sa/img/hero.jpg');
+    expect(info.images).not.toContain(
+      'https://shop.example.sa/assets/logo.png',
+    );
+    expect(info.images).not.toContain('https://shop.example.sa/icons/visa.svg');
+  });
 });

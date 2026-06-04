@@ -176,16 +176,20 @@ export class ExtractService {
     };
   }
 
-  /** Last-resort: a few page <img> sources. */
+  /** Last-resort page <img> sources, junk-filtered and ranked by size. */
   private fallbackImages($: CheerioAPI): string[] {
-    const urls: string[] = [];
-    $('img[src]')
-      .slice(0, 12)
-      .each((_, el) => {
-        const src = $(el).attr('src');
-        if (src && !src.startsWith('data:')) urls.push(src);
-      });
-    return urls;
+    const candidates: { src: string; score: number }[] = [];
+    $('img[src]').each((_, el) => {
+      const src = $(el).attr('src');
+      if (!src || src.startsWith('data:') || isJunkImage(src)) return;
+      const w = Number($(el).attr('width')) || 0;
+      const h = Number($(el).attr('height')) || 0;
+      candidates.push({ src, score: w * h });
+    });
+    return candidates
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 8)
+      .map((c) => c.src);
   }
 
   private resolveImages(candidates: string[], base: URL): string[] {
@@ -203,6 +207,13 @@ export class ExtractService {
     }
     return out;
   }
+}
+
+/** Heuristic: skip logos, icons, payment badges, sprites, svgs. */
+function isJunkImage(url: string): boolean {
+  return /logo|icon|sprite|favicon|placeholder|loading|spinner|avatar|badge|payment|visa|master(card)?|mada|apple-?pay|\.svg(\?|$)/i.test(
+    url,
+  );
 }
 
 // ── Untyped-JSON helpers (keep parsing type-safe) ──────────────────────────
