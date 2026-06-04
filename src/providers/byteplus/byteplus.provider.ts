@@ -101,9 +101,9 @@ export class ByteplusProvider implements GenerationProvider {
     const content: TaskContentPart[] = [
       { type: 'text', text: this.composeVideoPrompt(ctx) },
     ];
-    const imageUrl = this.firstImageUrl(ctx);
-    if (imageUrl)
-      content.push({ type: 'image_url', image_url: { url: imageUrl } });
+    for (const url of this.referenceImages(ctx)) {
+      content.push({ type: 'image_url', image_url: { url } });
+    }
 
     const created = await this.post<CreateTaskResponse>(
       `${baseUrl}/contents/generations/tasks`,
@@ -174,6 +174,31 @@ export class ByteplusProvider implements GenerationProvider {
   private characterName(ctx: GenerationContext): string | undefined {
     return ctx.request.attachments.find((a) => a.kind === 'character')
       ?.fileName;
+  }
+
+  /**
+   * Reference images for video: product first (primary subject), then the
+   * character/avatar so it can appear as the presenter. Sending both depends
+   * on the model supporting multiple references — disable with
+   * BYTEPLUS_INCLUDE_CHARACTER_IMAGE=false if it errors.
+   */
+  private referenceImages(ctx: GenerationContext): string[] {
+    const atts = ctx.request.attachments;
+    const product = atts.find((a) => a.kind === 'product' && a.url)?.url;
+    const character = atts.find((a) => a.kind === 'character' && a.url)?.url;
+    const includeCharacter =
+      this.config.get<string>('BYTEPLUS_INCLUDE_CHARACTER_IMAGE') !== 'false';
+
+    const images: string[] = [];
+    if (product) images.push(product);
+    if (includeCharacter && character && character !== product) {
+      images.push(character);
+    }
+    if (images.length === 0) {
+      const fallback = atts.find((a) => a.url)?.url;
+      if (fallback) images.push(fallback);
+    }
+    return images;
   }
 
   /**
