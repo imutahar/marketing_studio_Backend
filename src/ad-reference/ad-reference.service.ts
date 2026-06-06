@@ -94,6 +94,7 @@ export class AdReferenceService {
     const generation = this.generation.create({
       mode: 'video',
       prompt: scriptToPrompt(ref.script),
+      projectId: dto.projectId,
       options: [
         dto.resolution ?? '720p',
         dto.aspectRatio ?? ref.script.aspectRatio,

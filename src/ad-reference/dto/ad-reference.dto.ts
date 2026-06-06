@@ -51,5 +51,6 @@ export class UpdateScriptDto {
 export class GenerateAdReferenceDto {
   @IsOptional() @IsString() resolution?: string;
   @IsOptional() @IsString() aspectRatio?: string;
+  @IsOptional() @IsString() projectId?: string;
   @IsOptional() @IsInt() @Min(1) @Max(4) variations?: number;
 }
