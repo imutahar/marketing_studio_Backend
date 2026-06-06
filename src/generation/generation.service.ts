@@ -131,6 +131,9 @@ export class GenerationService {
       prompt,
       options: dto.options ?? [],
       attachments: dto.attachments ?? [],
+      negativePrompt: dto.negativePrompt,
+      seed: dto.seed,
+      cameraFixed: dto.cameraFixed,
     };
   }
 

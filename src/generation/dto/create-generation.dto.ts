@@ -2,7 +2,9 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsIn,
+  IsInt,
   IsOptional,
   IsString,
   MaxLength,
@@ -52,4 +54,17 @@ export class CreateGenerationDto {
   @ValidateNested({ each: true })
   @Type(() => AttachmentDto)
   attachments?: AttachmentDto[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  negativePrompt?: string;
+
+  @IsOptional()
+  @IsInt()
+  seed?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  cameraFixed?: boolean;
 }

@@ -77,6 +77,7 @@ export class ByteplusProvider implements GenerationProvider {
       watermark: false,
       stream: false,
     };
+    if (ctx.request.seed !== undefined) body.seed = ctx.request.seed;
     const imageUrl = this.firstImageUrl(ctx);
     if (imageUrl) body.image = imageUrl; // image-to-image reference
 
@@ -220,6 +221,15 @@ export class ByteplusProvider implements GenerationProvider {
     // Fold the chosen character/avatar into the prompt so it shapes the video.
     const character = this.characterName(ctx);
     if (character) descriptors.push(`يقدّمه ${character}`);
+    if (ctx.request.negativePrompt)
+      descriptors.push(`تجنّب: ${ctx.request.negativePrompt}`);
+
+    // Advanced settings → Seedance flags.
+    if (ctx.request.cameraFixed !== undefined) {
+      flags.push(`--camerafixed ${ctx.request.cameraFixed}`);
+    }
+    if (ctx.request.seed !== undefined)
+      flags.push(`--seed ${ctx.request.seed}`);
 
     return [styleText(ctx.request.prompt, descriptors), ...flags]
       .join(' ')
@@ -228,7 +238,10 @@ export class ByteplusProvider implements GenerationProvider {
 
   /** Image prompt enriched with the selected options (language, format, …). */
   private composeImagePrompt(ctx: GenerationContext): string {
-    return styleText(ctx.request.prompt, ctx.request.options);
+    const descriptors = [...ctx.request.options];
+    if (ctx.request.negativePrompt)
+      descriptors.push(`تجنّب: ${ctx.request.negativePrompt}`);
+    return styleText(ctx.request.prompt, descriptors);
   }
 
   private async post<T>(

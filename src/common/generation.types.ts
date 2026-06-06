@@ -20,6 +20,10 @@ export interface GenerationRequest {
   prompt: string;
   options: string[];
   attachments: AttachmentInput[];
+  /** Advanced settings. */
+  negativePrompt?: string;
+  seed?: number;
+  cameraFixed?: boolean;
 }
 
 /** What kind of generation this is — drives model/provider selection. */
