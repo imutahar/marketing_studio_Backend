@@ -32,6 +32,9 @@ const ALLOWED_VIDEO_RATIOS = new Set([
   'adaptive',
 ]);
 
+/** ModelArk accepts up to 14 reference images for image-to-image. */
+const MAX_IMAGE_REFERENCES = 14;
+
 /**
  * BytePlus (ModelArk / Seedance) provider.
  *
@@ -107,8 +110,11 @@ export class ByteplusProvider implements GenerationProvider {
       stream: false,
     };
     if (ctx.request.seed !== undefined) body.seed = ctx.request.seed;
-    const imageUrl = this.firstImageUrl(ctx);
-    if (imageUrl) body.image = imageUrl; // image-to-image reference
+    // image-to-image: pass ALL references (product + brand/extra images), not
+    // just the first. The API accepts a single url or an array (up to 14).
+    const refs = this.imageReferenceUrls(ctx);
+    if (refs.length === 1) body.image = refs[0];
+    else if (refs.length > 1) body.image = refs;
 
     const res = await this.post<ImageGenerationResponse>(
       `${baseUrl}/images/generations`,
@@ -205,11 +211,22 @@ export class ByteplusProvider implements GenerationProvider {
     );
   }
 
-  /** Prefer the product image as the reference; fall back to any attachment. */
-  private firstImageUrl(ctx: GenerationContext): string | undefined {
+  /**
+   * All reference image URLs for image-to-image, product first (primary
+   * subject) then the rest — deduped and capped at the API's 14-image limit.
+   */
+  private imageReferenceUrls(ctx: GenerationContext): string[] {
     const withUrl = ctx.request.attachments.filter((a) => Boolean(a.url));
-    const product = withUrl.find((a) => a.kind === 'product');
-    return (product ?? withUrl[0])?.url;
+    const ordered = [
+      ...withUrl.filter((a) => a.kind === 'product'),
+      ...withUrl.filter((a) => a.kind !== 'product'),
+    ];
+    const urls: string[] = [];
+    for (const a of ordered) {
+      if (a.url && !urls.includes(a.url)) urls.push(a.url);
+      if (urls.length >= MAX_IMAGE_REFERENCES) break;
+    }
+    return urls;
   }
 
   /** The selected character/avatar name, if any (kind === 'character'). */
