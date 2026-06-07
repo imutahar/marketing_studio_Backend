@@ -24,7 +24,7 @@ const REQUEST_TIMEOUT_MS = 120_000;
  *                                GET  {base}/contents/generations/tasks/{id}
  *
  * Verified against the ModelArk API:
- *   video model: seedance-1-0-pro-fast-251015 (params via --flags in the text)
+ *   video model: seedance-1-5-pro-251215 (params via --flags in the text)
  *   image model: seedream-5-0-260128
  * Both are env-overridable (BYTEPLUS_VIDEO_MODEL / BYTEPLUS_IMAGE_MODEL); only
  * BYTEPLUS_API_KEY is required.
@@ -154,6 +154,7 @@ export class ByteplusProvider implements GenerationProvider {
           return task.content.video_url;
         case 'failed':
         case 'cancelled':
+        case 'expired':
           throw new Error(
             `BytePlus task ${task.status}: ${task.error?.message ?? 'no detail'}`,
           );
@@ -170,7 +171,7 @@ export class ByteplusProvider implements GenerationProvider {
     if (kind === 'video') {
       return (
         this.config.get<string>('BYTEPLUS_VIDEO_MODEL') ??
-        'seedance-1-0-pro-fast-251015'
+        'seedance-1-5-pro-251215'
       );
     }
     return (
@@ -328,7 +329,7 @@ interface CreateTaskResponse {
 
 interface TaskStatusResponse {
   id: string;
-  /** e.g. queued | running | succeeded | failed | cancelled */
+  /** queued | running | succeeded | failed | cancelled | expired */
   status: string;
   content?: { video_url?: string };
   error?: { message?: string };
