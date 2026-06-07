@@ -65,6 +65,28 @@ describe('Marketing Studio backend (e2e)', () => {
     expect(final.outputs[0].type).toBe('video');
   }, 10000);
 
+  it('POST /api/generations with an image → image-to-video', async () => {
+    const dataUri =
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQAY3Y2wAAAAAElFTkSuQmCC';
+    const create = await request(app.getHttpServer())
+      .post('/api/generations')
+      .send({
+        mode: 'video',
+        prompt: 'حوّل صورة المنتج إلى فيديو',
+        attachments: [
+          {
+            slotId: 'product',
+            kind: 'product',
+            fileName: 'p.png',
+            url: dataUri,
+          },
+        ],
+      })
+      .expect(202);
+
+    expect((create.body as JobResponse).capability).toBe('image-to-video');
+  });
+
   it('POST /api/generations → rejects invalid mode', () => {
     return request(app.getHttpServer())
       .post('/api/generations')
