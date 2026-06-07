@@ -6,7 +6,9 @@ import { GenerationProvider } from '../providers/provider.interface';
 import { CreateGenerationDto } from './dto/create-generation.dto';
 import { UsageService } from '../usage/usage.service';
 import { ProjectsService } from '../projects/projects.service';
+import { StorageService } from '../storage/storage.service';
 import {
+  GenerationOutput,
   GenerationRequest,
   Job,
   resolveCapability,
@@ -27,6 +29,7 @@ export class GenerationService {
     private readonly registry: ProviderRegistry,
     private readonly usage: UsageService,
     private readonly projects: ProjectsService,
+    private readonly storage: StorageService,
   ) {}
 
   /** Create a job and kick off generation asynchronously (clients poll status). */
@@ -98,11 +101,25 @@ export class GenerationService {
 
     this.store.update(jobId, { status: 'processing' });
     try {
-      const outputs = await provider.generate({
+      // INPUTS: ModelArk needs publicly reachable image URLs. Merchant uploads
+      // arrive as base64 data URIs, so re-host them on Blob (best-effort) and
+      // swap the durable URL into the request the provider receives.
+      if (this.storage.isEnabled()) {
+        await this.persistInputs(jobId, job);
+      }
+
+      const rawOutputs = await provider.generate({
         jobId,
         capability: job.capability,
         request: job.request,
       });
+
+      // OUTPUTS: BytePlus URLs expire (~24h). Re-host each on Blob so the ad
+      // library stays durable; on any failure the original URL is preserved.
+      const outputs = this.storage.isEnabled()
+        ? await this.persistOutputs(jobId, rawOutputs)
+        : rawOutputs;
+
       this.store.update(jobId, { status: 'succeeded', outputs });
       this.usage.consume(this.tokenCost(job)); // only successful jobs cost tokens
       if (job.projectId) {
@@ -113,6 +130,44 @@ export class GenerationService {
       this.logger.error(`Job ${jobId} failed: ${message}`);
       this.store.update(jobId, { status: 'failed', error: message });
     }
+  }
+
+  /**
+   * Re-host every base64 data-URI attachment on Blob and rewrite the request's
+   * attachment urls to the durable public URLs (in place), then persist the
+   * updated request back to the store. Best-effort: uploadDataUri never throws
+   * and returns the original url on failure.
+   */
+  private async persistInputs(jobId: string, job: Job): Promise<void> {
+    const attachments = job.request.attachments;
+    await Promise.all(
+      attachments.map(async (attachment) => {
+        if (attachment.url?.startsWith('data:')) {
+          attachment.url = await this.storage.uploadDataUri(
+            attachment.url,
+            `inputs/${jobId}/${attachment.slotId}`,
+          );
+        }
+      }),
+    );
+    // Reflect the durable input URLs on the job record (merge patch).
+    this.store.update(jobId, { request: job.request });
+  }
+
+  /**
+   * Re-host every output on Blob, preserving each output's type. Best-effort:
+   * uploadFromUrl never throws and returns the original url on failure.
+   */
+  private async persistOutputs(
+    jobId: string,
+    outputs: GenerationOutput[],
+  ): Promise<GenerationOutput[]> {
+    return Promise.all(
+      outputs.map(async (out, i) => ({
+        type: out.type,
+        url: await this.storage.uploadFromUrl(out.url, `outputs/${jobId}/${i}`),
+      })),
+    );
   }
 
   /**

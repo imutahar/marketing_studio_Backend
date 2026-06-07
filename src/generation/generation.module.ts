@@ -7,9 +7,10 @@ import { JobStore } from './job.store';
 import { ProvidersModule } from '../providers/providers.module';
 import { UsageModule } from '../usage/usage.module';
 import { ProjectsModule } from '../projects/projects.module';
+import { StorageModule } from '../storage/storage.module';
 
 @Module({
-  imports: [ProvidersModule, UsageModule, ProjectsModule],
+  imports: [ProvidersModule, UsageModule, ProjectsModule, StorageModule],
   controllers: [
     GenerationController,
     AssetsController,
