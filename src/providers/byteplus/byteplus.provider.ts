@@ -121,7 +121,9 @@ export class ByteplusProvider implements GenerationProvider {
     const created = await this.post<CreateTaskResponse>(
       `${baseUrl}/contents/generations/tasks`,
       apiKey,
-      { model, content },
+      // generate_audio defaults to true on Seedance 1.5-Pro (and ~doubles token
+      // cost), so always send it explicitly — off unless the user opted in.
+      { model, content, generate_audio: ctx.request.generateAudio ?? false },
     );
     this.logger.log(
       `BytePlus video task ${created.id} created (job ${ctx.jobId}).`,

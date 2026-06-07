@@ -190,6 +190,7 @@ export class GenerationService {
       negativePrompt: dto.negativePrompt,
       seed: dto.seed,
       cameraFixed: dto.cameraFixed,
+      generateAudio: dto.generateAudio,
     };
   }
 

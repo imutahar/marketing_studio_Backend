@@ -67,4 +67,9 @@ export class CreateGenerationDto {
   @IsOptional()
   @IsBoolean()
   cameraFixed?: boolean;
+
+  /** Video only: generate synced audio (voice/SFX/music). Default off. */
+  @IsOptional()
+  @IsBoolean()
+  generateAudio?: boolean;
 }
