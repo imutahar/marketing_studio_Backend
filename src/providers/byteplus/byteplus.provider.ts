@@ -2,6 +2,15 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GenerationContext, GenerationProvider } from '../provider.interface';
 import { Capability, GenerationOutput } from '../../common/generation.types';
+import { parseDurationSeconds } from '../../common/duration';
+
+/**
+ * Per-request HTTP timeout. The video poll has its own wall-clock deadline
+ * between polls (pollTimeoutMs), but a SINGLE hung fetch must not block
+ * indefinitely and pin a job in 'processing' forever. Kept well under the
+ * poll cadence so a stuck request fails fast and the loop can recover.
+ */
+const REQUEST_TIMEOUT_MS = 30_000;
 
 /**
  * BytePlus (ModelArk / Seedance) provider.
@@ -211,8 +220,8 @@ export class ByteplusProvider implements GenerationProvider {
     const flags: string[] = [];
     const descriptors: string[] = [];
     for (const opt of ctx.request.options) {
-      const duration = opt.match(/^(\d+)\s*(?:s|ث)$/); // "12s" or "12 ث"
-      if (duration) flags.push(`--duration ${duration[1]}`);
+      const duration = parseDurationSeconds([opt]); // "12s" or "12 ث"
+      if (duration !== undefined) flags.push(`--duration ${duration}`);
       else if (/^\d+:\d+$/.test(opt)) flags.push(`--ratio ${opt}`);
       else if (/^\d+p$/i.test(opt)) flags.push(`--resolution ${opt}`);
       else descriptors.push(opt); // style descriptors, e.g. نوع الفيديو
@@ -249,14 +258,29 @@ export class ByteplusProvider implements GenerationProvider {
     apiKey: string,
     body: unknown,
   ): Promise<T> {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(body),
-    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        throw new Error(
+          `BytePlus request timed out after ${REQUEST_TIMEOUT_MS}ms (POST ${url}).`,
+        );
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
     if (!res.ok) {
       throw new Error(
         `BytePlus ${res.status} (POST ${url}): ${await res.text()}`,
@@ -266,9 +290,24 @@ export class ByteplusProvider implements GenerationProvider {
   }
 
   private async get<T>(url: string, apiKey: string): Promise<T> {
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        signal: controller.signal,
+      });
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        throw new Error(
+          `BytePlus request timed out after ${REQUEST_TIMEOUT_MS}ms (GET ${url}).`,
+        );
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
     if (!res.ok) {
       throw new Error(
         `BytePlus ${res.status} (GET ${url}): ${await res.text()}`,
