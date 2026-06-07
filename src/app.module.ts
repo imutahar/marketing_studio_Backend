@@ -9,6 +9,7 @@ import { UsageModule } from './usage/usage.module';
 import { ExtractModule } from './extract/extract.module';
 import { AdReferenceModule } from './ad-reference/ad-reference.module';
 import { ProjectsModule } from './projects/projects.module';
+import { AppPasswordGuard } from './common/app-password.guard';
 
 @Module({
   imports: [
@@ -22,6 +23,10 @@ import { ProjectsModule } from './projects/projects.module';
     ProjectsModule,
   ],
   controllers: [AppController],
-  providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
+  providers: [
+    AppService,
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_GUARD, useClass: AppPasswordGuard },
+  ],
 })
 export class AppModule {}
