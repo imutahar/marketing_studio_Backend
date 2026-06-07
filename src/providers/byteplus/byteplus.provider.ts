@@ -16,6 +16,23 @@ import { parseDurationSeconds } from '../../common/duration';
 const REQUEST_TIMEOUT_MS = 120_000;
 
 /**
+ * Documented Seedance value sets. Video params are sent in the structured task
+ * body, which ModelArk validates strictly — so a value outside these sets (e.g.
+ * a frontend "2:1" ratio the API doesn't support) is dropped rather than
+ * failing the whole job; the model falls back to its default for that field.
+ */
+const ALLOWED_VIDEO_RESOLUTIONS = new Set(['480p', '720p', '1080p']);
+const ALLOWED_VIDEO_RATIOS = new Set([
+  '16:9',
+  '4:3',
+  '1:1',
+  '3:4',
+  '9:16',
+  '21:9',
+  'adaptive',
+]);
+
+/**
  * BytePlus (ModelArk / Seedance) provider.
  *
  * Implements ModelArk's API shape:
@@ -118,12 +135,21 @@ export class ByteplusProvider implements GenerationProvider {
       content.push({ type: 'image_url', image_url: { url } });
     }
 
+    // Resolution/ratio/duration/seed/camera_fixed go in the structured task
+    // body (strictly validated by ModelArk) — NOT as --flags in the prompt
+    // text, which silently ignored bad values and could be dropped entirely.
+    const params = this.videoParams(ctx);
     const created = await this.post<CreateTaskResponse>(
       `${baseUrl}/contents/generations/tasks`,
       apiKey,
       // generate_audio defaults to true on Seedance 1.5-Pro (and ~doubles token
       // cost), so always send it explicitly — off unless the user opted in.
-      { model, content, generate_audio: ctx.request.generateAudio ?? false },
+      {
+        model,
+        content,
+        ...params,
+        generate_audio: ctx.request.generateAudio ?? false,
+      },
     );
     this.logger.log(
       `BytePlus video task ${created.id} created (job ${ctx.jobId}).`,
@@ -218,19 +244,19 @@ export class ByteplusProvider implements GenerationProvider {
   }
 
   /**
-   * Append recognized Seedance parameters as command flags to the prompt.
-   * Flag names follow ModelArk's text-command convention — verify against your
-   * console and adjust this single mapping if needed.
+   * Descriptive video prompt text only (style chips, presenter, negative cue).
+   * Numeric parameters (resolution/ratio/duration/seed/camera_fixed) are NOT
+   * embedded here — they go in the structured task body via videoParams().
    */
   private composeVideoPrompt(ctx: GenerationContext): string {
-    const flags: string[] = [];
     const descriptors: string[] = [];
     for (const opt of ctx.request.options) {
-      const duration = parseDurationSeconds([opt]); // "12s" or "12 ث"
-      if (duration !== undefined) flags.push(`--duration ${duration}`);
-      else if (/^\d+:\d+$/.test(opt)) flags.push(`--ratio ${opt}`);
-      else if (/^\d+p$/i.test(opt)) flags.push(`--resolution ${opt}`);
-      else descriptors.push(opt); // style descriptors, e.g. نوع الفيديو
+      // Skip values carried by structured params; keep style descriptors.
+      const isParam =
+        parseDurationSeconds([opt]) !== undefined ||
+        /^\d+:\d+$/.test(opt) ||
+        /^\d+p$/i.test(opt);
+      if (!isParam) descriptors.push(opt); // e.g. نوع الفيديو
     }
 
     // Fold the chosen character/avatar into the prompt so it shapes the video.
@@ -239,16 +265,32 @@ export class ByteplusProvider implements GenerationProvider {
     if (ctx.request.negativePrompt)
       descriptors.push(`تجنّب: ${ctx.request.negativePrompt}`);
 
-    // Advanced settings → Seedance flags.
-    if (ctx.request.cameraFixed !== undefined) {
-      flags.push(`--camerafixed ${ctx.request.cameraFixed}`);
-    }
-    if (ctx.request.seed !== undefined)
-      flags.push(`--seed ${ctx.request.seed}`);
+    return styleText(ctx.request.prompt, descriptors);
+  }
 
-    return [styleText(ctx.request.prompt, descriptors), ...flags]
-      .join(' ')
-      .trim();
+  /**
+   * Structured Seedance parameters for the task body. ModelArk validates these
+   * strictly (the legacy --flag text silently ignored bad values), so only emit
+   * values inside the documented allowed sets; everything else is dropped and
+   * the model uses its default for that field.
+   */
+  private videoParams(ctx: GenerationContext): Record<string, unknown> {
+    const params: Record<string, unknown> = {};
+    for (const opt of ctx.request.options) {
+      const duration = parseDurationSeconds([opt]); // "12s" or "12 ث"
+      if (duration !== undefined) {
+        params.duration = duration;
+      } else if (ALLOWED_VIDEO_RATIOS.has(opt)) {
+        params.ratio = opt;
+      } else if (ALLOWED_VIDEO_RESOLUTIONS.has(opt.toLowerCase())) {
+        params.resolution = opt.toLowerCase();
+      }
+    }
+    if (ctx.request.cameraFixed !== undefined) {
+      params.camera_fixed = ctx.request.cameraFixed;
+    }
+    if (ctx.request.seed !== undefined) params.seed = ctx.request.seed;
+    return params;
   }
 
   /** Image prompt enriched with the selected options (language, format, …). */
