@@ -23,6 +23,26 @@ export interface GenerationProvider {
 
   /** Run generation; resolve with outputs when complete, reject on failure. */
   generate(ctx: GenerationContext): Promise<GenerationOutput[]>;
+
+  /** Whether this provider supports the cheap 480p draft → promote flow. */
+  supportsDraft?(): boolean;
+
+  /**
+   * Create a 480p draft and resolve once it has succeeded. Returns the draft
+   * task id (used later to promote) plus the preview video url.
+   */
+  createDraft?(
+    ctx: GenerationContext,
+  ): Promise<{ draftTaskId: string; previewUrl: string }>;
+
+  /**
+   * Promote a previously created draft to a full render at the user's target
+   * resolution, re-running full inference. Resolves with the final outputs.
+   */
+  promoteDraft?(
+    ctx: GenerationContext,
+    draftTaskId: string,
+  ): Promise<GenerationOutput[]>;
 }
 
 /** DI token for the registered provider list. */

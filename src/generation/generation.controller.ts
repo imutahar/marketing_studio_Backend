@@ -30,4 +30,11 @@ export class GenerationController {
   get(@Param('id') id: string) {
     return this.service.get(id);
   }
+
+  /** Approve a draft_ready job and kick off the full render. Returns 202. */
+  @Post(':id/approve')
+  @HttpCode(HttpStatus.ACCEPTED)
+  approve(@Param('id') id: string) {
+    return this.service.approve(id);
+  }
 }

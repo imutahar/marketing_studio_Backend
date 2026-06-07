@@ -72,4 +72,9 @@ export class CreateGenerationDto {
   @IsOptional()
   @IsBoolean()
   generateAudio?: boolean;
+
+  /** Video only: opt into the cheap 480p draft → approve → full render flow. */
+  @IsOptional()
+  @IsBoolean()
+  draft?: boolean;
 }
