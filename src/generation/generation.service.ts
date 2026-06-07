@@ -1,9 +1,12 @@
 import {
   BadRequestException,
+  HttpException,
+  HttpStatus,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import { JobStore } from './job.store';
 import { ProviderRegistry } from '../providers/provider.registry';
@@ -28,10 +31,17 @@ const DEFAULT_VIDEO_SECONDS = 10;
 const DRAFT_COST_MULTIPLIER = 0.6;
 /** A draft task id is valid for 7 days (ModelArk); after that, regenerate. */
 const DRAFT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+/** Default hard daily cap on generations (cost backstop) when env is unset. */
+const DEFAULT_MAX_GENERATIONS_PER_DAY = 200;
 
 @Injectable()
 export class GenerationService {
   private readonly logger = new Logger(GenerationService.name);
+
+  /** Hard daily cap on generations as a cost backstop. */
+  private readonly maxGenerationsPerDay: number;
+  /** In-memory daily counter (resets on restart; acceptable for a backstop). */
+  private dailyUsage = { date: this.today(), count: 0 };
 
   constructor(
     private readonly store: JobStore,
@@ -39,10 +49,17 @@ export class GenerationService {
     private readonly usage: UsageService,
     private readonly projects: ProjectsService,
     private readonly storage: StorageService,
-  ) {}
+    config: ConfigService,
+  ) {
+    this.maxGenerationsPerDay = Number(
+      config.get('MAX_GENERATIONS_PER_DAY') ?? DEFAULT_MAX_GENERATIONS_PER_DAY,
+    );
+  }
 
   /** Create a job and kick off generation asynchronously (clients poll status). */
   create(dto: CreateGenerationDto): Job {
+    this.enforceDailyCap();
+
     const request = this.applyProjectContext(dto);
 
     const capability = resolveCapability(request);
@@ -338,6 +355,30 @@ export class GenerationService {
       generateAudio: dto.generateAudio,
       draft: dto.draft,
     };
+  }
+
+  /** Today's date as YYYY-MM-DD (UTC), used to bucket the daily counter. */
+  private today(): string {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  /**
+   * Cost backstop: bound total generations/day regardless of caller. Resets the
+   * counter when the day rolls over, then throws 429 once the cap is hit.
+   * Counts every create() (image + video). In-memory; resets on restart.
+   */
+  private enforceDailyCap(): void {
+    const today = this.today();
+    if (this.dailyUsage.date !== today) {
+      this.dailyUsage = { date: today, count: 0 };
+    }
+    if (this.dailyUsage.count >= this.maxGenerationsPerDay) {
+      throw new HttpException(
+        'Daily generation limit reached. Please try again tomorrow.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+    this.dailyUsage.count += 1;
   }
 
   /** Token cost of a job: images flat, videos scale with duration. */
