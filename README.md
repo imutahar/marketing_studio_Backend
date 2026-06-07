@@ -66,3 +66,28 @@ npm test            # unit tests
 npm run test:e2e    # end-to-end (create → poll → result)
 npm run lint        # eslint
 ```
+
+## Deploy (Railway)
+
+The backend runs long-lived async jobs with an in-memory store, so it needs an
+**always-on host** (not serverless). `railway.json` configures it:
+
+- **Build:** `npm run build` (Nixpacks)
+- **Start:** `npm run start:prod` (`node dist/main`)
+- **Health check:** `/api/health`
+- Binds `0.0.0.0` and reads the `PORT` Railway injects — don't set `PORT` yourself.
+
+**Set these env vars in the Railway service** (Variables tab):
+
+| Var | Value |
+| --- | --- |
+| `GENERATION_PROVIDER` | `byteplus` |
+| `BYTEPLUS_API_KEY` | your ModelArk key |
+| `CORS_ORIGINS` | the deployed frontend origin(s), e.g. `https://marketingstudio-ten.vercel.app` |
+
+Then point the **frontend** at the backend: set `NEXT_PUBLIC_API_URL` in Vercel to
+the Railway public URL and redeploy.
+
+> ⚠️ State is in-memory — run a **single instance** for now (don't scale
+> horizontally until the JobStore moves to Postgres/Redis). See Phase 2.
+
