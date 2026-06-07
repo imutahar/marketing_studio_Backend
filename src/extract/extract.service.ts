@@ -80,8 +80,11 @@ export class ExtractService {
 
   private async fetchHtml(startUrl: URL): Promise<string> {
     let url = startUrl;
+    // One overall deadline shared by every hop, so a redirect chain can't
+    // stretch the total time to MAX_REDIRECTS × TIMEOUT_MS.
+    const deadline = Date.now() + TIMEOUT_MS;
     for (let hop = 0; ; hop++) {
-      const res = await this.fetchOnce(url);
+      const res = await this.fetchOnce(url, deadline);
       // Manually follow redirects so each target is re-validated (a redirect
       // to a private/metadata IP would otherwise bypass the SSRF guard).
       if (res.status >= 300 && res.status < 400) {
@@ -121,10 +124,16 @@ export class ExtractService {
     return this.assertSafeUrl(target);
   }
 
-  /** A single fetch hop with its own abort timeout and no auto-redirects. */
-  private async fetchOnce(url: URL): Promise<Response> {
+  /** A single fetch hop, aborted at the shared `deadline` (epoch ms) and with
+   * no auto-redirects. The remaining time — not a fresh TIMEOUT_MS — bounds
+   * this hop, so the whole redirect chain stays within one overall budget. */
+  private async fetchOnce(url: URL, deadline: number): Promise<Response> {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      throw new ServiceUnavailableException('انتهت مهلة قراءة الصفحة.');
+    }
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), remaining);
     try {
       return await fetch(url.toString(), {
         signal: controller.signal,

@@ -51,7 +51,13 @@ export class JobStore {
   }
 
   /** Evict the oldest jobs until the map is within MAX_JOBS. Map preserves
-   * insertion order, so the first key is the oldest. */
+   * insertion order, so the first key is the oldest.
+   *
+   * TODO(persistence): eviction is purely insertion-order, so once MAX_JOBS
+   * newer jobs exist, a still-actively-polled (non-terminal) job could in
+   * principle be evicted out from under its poller. The Redis/Postgres swap
+   * should preserve in-flight jobs — e.g. evict by terminal-state + age rather
+   * than pure insertion order — so only finished jobs are reclaimed. */
   private evict(): void {
     while (this.jobs.size > MAX_JOBS) {
       const oldest = this.jobs.keys().next();
