@@ -30,6 +30,8 @@ export interface AdReference {
   error?: string;
   /** Set once a generation has been kicked off from this reference. */
   generationId?: string;
+  /** All generations kicked off (one per requested variation). */
+  generationIds?: string[];
   createdAt: string;
   updatedAt: string;
 }

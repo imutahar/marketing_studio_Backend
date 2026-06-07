@@ -11,6 +11,7 @@ import {
   Job,
   resolveCapability,
 } from '../common/generation.types';
+import { parseDurationSeconds } from '../common/duration';
 import { Asset } from './asset.types';
 
 const IMAGE_TOKEN_COST = 20;
@@ -140,17 +141,10 @@ export class GenerationService {
   /** Token cost of a job: images flat, videos scale with duration. */
   private tokenCost(job: Job): number {
     if (job.request.mode === 'video') {
-      return videoSeconds(job.request.options) * VIDEO_TOKENS_PER_SECOND;
+      const seconds =
+        parseDurationSeconds(job.request.options) ?? DEFAULT_VIDEO_SECONDS;
+      return seconds * VIDEO_TOKENS_PER_SECOND;
     }
     return IMAGE_TOKEN_COST;
   }
-}
-
-/** Extract the selected video duration (seconds) from the options, if any. */
-function videoSeconds(options: string[]): number {
-  for (const opt of options) {
-    const match = opt.match(/^(\d+)\s*(?:s|ث)$/);
-    if (match) return Number(match[1]);
-  }
-  return DEFAULT_VIDEO_SECONDS;
 }

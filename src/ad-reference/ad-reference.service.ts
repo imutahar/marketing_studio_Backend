@@ -61,8 +61,11 @@ export class AdReferenceService {
     return this.update(id, { script: dto, status: 'ready' });
   }
 
-  /** Kick off a generation from the (edited) script; reuses the gen pipeline. */
-  generate(id: string, dto: GenerateAdReferenceDto): { generationId: string } {
+  /** Kick off generation(s) from the (edited) script; reuses the gen pipeline. */
+  generate(
+    id: string,
+    dto: GenerateAdReferenceDto,
+  ): { generationId: string; generationIds: string[] } {
     const ref = this.get(id);
     if (!ref.script) {
       throw new BadRequestException('Script is not ready yet.');
@@ -91,19 +94,31 @@ export class AdReferenceService {
       });
     }
 
-    const generation = this.generation.create({
-      mode: 'video',
-      prompt: scriptToPrompt(ref.script),
-      projectId: dto.projectId,
-      options: [
-        dto.resolution ?? '720p',
-        dto.aspectRatio ?? ref.script.aspectRatio,
-      ],
-      attachments,
-    });
+    // Honor the requested number of variations (validated 1–4); each is an
+    // independent job through the existing single-generation path.
+    const count = dto.variations ?? 1;
+    const generationIds: string[] = [];
+    for (let i = 0; i < count; i++) {
+      const generation = this.generation.create({
+        mode: 'video',
+        prompt: scriptToPrompt(ref.script),
+        projectId: dto.projectId,
+        options: [
+          dto.resolution ?? '720p',
+          dto.aspectRatio ?? ref.script.aspectRatio,
+        ],
+        attachments,
+      });
+      generationIds.push(generation.id);
+    }
 
-    this.update(id, { generationId: generation.id });
-    return { generationId: generation.id };
+    // `generationId` stays the first id for backward compatibility; the full
+    // list is exposed additively via `generationIds`.
+    this.update(id, {
+      generationId: generationIds[0],
+      generationIds,
+    });
+    return { generationId: generationIds[0], generationIds };
   }
 
   private async analyze(id: string): Promise<void> {
