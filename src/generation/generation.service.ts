@@ -1,4 +1,9 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { JobStore } from './job.store';
 import { ProviderRegistry } from '../providers/provider.registry';
@@ -19,6 +24,10 @@ import { Asset } from './asset.types';
 const IMAGE_TOKEN_COST = 20;
 const VIDEO_TOKENS_PER_SECOND = 10;
 const DEFAULT_VIDEO_SECONDS = 10;
+/** Drafts run a cheap 480p preview, so they cost a fraction of the full job. */
+const DRAFT_COST_MULTIPLIER = 0.6;
+/** A draft task id is valid for 7 days (ModelArk); after that, regenerate. */
+const DRAFT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class GenerationService {
@@ -52,6 +61,18 @@ export class GenerationService {
       updatedAt: now,
     };
     this.store.create(job);
+
+    // Draft mode: video only, user opt-in, provider must support it. Kick off
+    // the 480p preview instead of a single-shot render; the job pauses at
+    // draft_ready until the client approves it.
+    if (
+      request.draft === true &&
+      request.mode === 'video' &&
+      provider.supportsDraft?.()
+    ) {
+      void this.runDraft(job.id, provider);
+      return job;
+    }
 
     // Fire-and-forget: clients poll GET /generations/:id for progress.
     void this.run(job.id, provider);
@@ -133,6 +154,130 @@ export class GenerationService {
   }
 
   /**
+   * Phase 1 of draft mode: create the cheap 480p preview and pause at
+   * draft_ready. Persists the preview durably (BytePlus preview urls expire in
+   * ~24h) and stores the draft task id so approve() can promote it later.
+   * Charges a reduced draft cost (~0.6x the full job).
+   */
+  private async runDraft(
+    jobId: string,
+    provider: GenerationProvider,
+  ): Promise<void> {
+    const job = this.store.get(jobId);
+    if (!job) return;
+
+    this.store.update(jobId, { status: 'processing' });
+    try {
+      if (this.storage.isEnabled()) {
+        await this.persistInputs(jobId, job);
+      }
+
+      // Provider was already checked to support drafts in create(); the
+      // optional-chaining keeps the type contract honest.
+      if (!provider.createDraft) {
+        throw new Error(`Provider ${provider.name} does not support drafts.`);
+      }
+      const { draftTaskId, previewUrl } = await provider.createDraft({
+        jobId,
+        capability: job.capability,
+        request: job.request,
+      });
+
+      // BytePlus preview urls expire (~24h) — re-host so it survives until the
+      // user gets around to approving.
+      const durablePreview = this.storage.isEnabled()
+        ? await this.storage.uploadFromUrl(
+            previewUrl,
+            `drafts/${jobId}/preview`,
+          )
+        : previewUrl;
+
+      this.store.update(jobId, {
+        status: 'draft_ready',
+        draftTaskId,
+        draftPreviewUrl: durablePreview,
+      });
+      // Drafts cost less than a full render.
+      this.usage.consume(
+        Math.round(this.tokenCost(job) * DRAFT_COST_MULTIPLIER),
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      this.logger.error(`Draft ${jobId} failed: ${message}`);
+      this.store.update(jobId, { status: 'failed', error: message });
+    }
+  }
+
+  /**
+   * Phase 2 of draft mode: promote an approved draft to the full render at the
+   * user's target resolution. Validates the draft state + 7-day window, then
+   * runs the promotion fire-and-forget (like create()) so the client polls.
+   */
+  approve(id: string): Job {
+    const job = this.store.get(id);
+    if (!job) throw new NotFoundException(`Generation "${id}" not found.`);
+    if (job.status !== 'draft_ready') {
+      throw new BadRequestException(
+        `Generation "${id}" is not awaiting approval (status: ${job.status}).`,
+      );
+    }
+    if (!job.draftTaskId) {
+      throw new BadRequestException(
+        `Generation "${id}" has no draft task to promote.`,
+      );
+    }
+    // The ModelArk draft task id is valid 7 days; past that, promotion fails.
+    if (Date.now() - new Date(job.createdAt).getTime() > DRAFT_TTL_MS) {
+      throw new BadRequestException('draft expired — regenerate');
+    }
+
+    // Re-resolve the provider by capability (same as create()).
+    const provider = this.registry.resolve(job.capability);
+
+    this.store.update(id, { status: 'processing' });
+    const promoting = this.store.get(id) ?? job;
+
+    // Fire-and-forget: client polls GET /generations/:id for the full render.
+    void this.runPromotion(id, provider, job.draftTaskId);
+
+    return promoting;
+  }
+
+  /** Background half of approve(): promote the draft and persist outputs. */
+  private async runPromotion(
+    jobId: string,
+    provider: GenerationProvider,
+    draftTaskId: string,
+  ): Promise<void> {
+    const job = this.store.get(jobId);
+    if (!job) return;
+    try {
+      if (!provider.promoteDraft) {
+        throw new Error(`Provider ${provider.name} does not support drafts.`);
+      }
+      const rawOutputs = await provider.promoteDraft(
+        { jobId, capability: job.capability, request: job.request },
+        draftTaskId,
+      );
+
+      const outputs = this.storage.isEnabled()
+        ? await this.persistOutputs(jobId, rawOutputs)
+        : rawOutputs;
+
+      this.store.update(jobId, { status: 'succeeded', outputs });
+      // Promotion re-runs full inference — charge the full job cost.
+      this.usage.consume(this.tokenCost(job));
+      if (job.projectId) {
+        this.projects.recordGeneration(job.projectId, outputs[0]?.url);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      this.logger.error(`Promotion ${jobId} failed: ${message}`);
+      this.store.update(jobId, { status: 'failed', error: message });
+    }
+  }
+
+  /**
    * Re-host every base64 data-URI attachment on Blob and rewrite the request's
    * attachment urls to the durable public URLs (in place), then persist the
    * updated request back to the store. Best-effort: uploadDataUri never throws
@@ -191,6 +336,7 @@ export class GenerationService {
       seed: dto.seed,
       cameraFixed: dto.cameraFixed,
       generateAudio: dto.generateAudio,
+      draft: dto.draft,
     };
   }
 

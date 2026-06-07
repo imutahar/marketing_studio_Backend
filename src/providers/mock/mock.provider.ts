@@ -31,6 +31,30 @@ export class MockProvider implements GenerationProvider {
       { type: 'image', url: `https://picsum.photos/seed/${seed}/720/1280` },
     ];
   }
+
+  // ── Draft mode ─────────────────────────────────────────────────────────
+  supportsDraft(): boolean {
+    return true;
+  }
+
+  /** Fake 480p draft so the two-phase flow works with no external provider. */
+  async createDraft(
+    ctx: GenerationContext,
+  ): Promise<{ draftTaskId: string; previewUrl: string }> {
+    this.logger.log(`Creating mock draft for job ${ctx.jobId}`);
+    await delay(1500);
+    return { draftTaskId: `mock-draft-${ctx.jobId}`, previewUrl: SAMPLE_VIDEO };
+  }
+
+  /** Promote the mock draft to a "full" render (same sample video). */
+  async promoteDraft(
+    ctx: GenerationContext,
+    draftTaskId: string,
+  ): Promise<GenerationOutput[]> {
+    this.logger.log(`Promoting mock draft ${draftTaskId} for job ${ctx.jobId}`);
+    await delay(1500);
+    return [{ type: 'video', url: SAMPLE_VIDEO }];
+  }
 }
 
 function delay(ms: number): Promise<void> {

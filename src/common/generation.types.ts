@@ -3,7 +3,12 @@
 
 export type GenerationMode = 'image' | 'video';
 
-export type JobStatus = 'queued' | 'processing' | 'succeeded' | 'failed';
+export type JobStatus =
+  | 'queued'
+  | 'processing'
+  | 'draft_ready'
+  | 'succeeded'
+  | 'failed';
 
 export type AttachmentKind = 'product' | 'character' | 'image';
 
@@ -26,6 +31,11 @@ export interface GenerationRequest {
   cameraFixed?: boolean;
   /** Video only: generate synced audio (voice/SFX/music). Default off. */
   generateAudio?: boolean;
+  /**
+   * Video only (user opt-in): run the cheap 480p "draft" first and pause at
+   * draft_ready for approval before the full render. Seedance 1.5-Pro only.
+   */
+  draft?: boolean;
 }
 
 /** What kind of generation this is — drives model/provider selection. */
@@ -48,6 +58,10 @@ export interface Job {
   provider: string;
   outputs: GenerationOutput[];
   error?: string;
+  /** Draft mode: the ModelArk draft task id (valid 7 days), used to promote. */
+  draftTaskId?: string;
+  /** Draft mode: durable URL of the 480p preview shown before approval. */
+  draftPreviewUrl?: string;
   /** Optional owning project. */
   projectId?: string;
   createdAt: string;

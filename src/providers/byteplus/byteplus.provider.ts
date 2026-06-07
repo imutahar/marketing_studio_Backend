@@ -78,15 +78,7 @@ export class ByteplusProvider implements GenerationProvider {
   }
 
   async generate(ctx: GenerationContext): Promise<GenerationOutput[]> {
-    const apiKey = this.config.get<string>('BYTEPLUS_API_KEY');
-    if (!apiKey) {
-      throw new Error(
-        'BytePlus provider is not configured: set BYTEPLUS_API_KEY to enable real generation.',
-      );
-    }
-    const baseUrl = (
-      this.config.get<string>('BYTEPLUS_ENDPOINT') ?? this.defaultEndpoint
-    ).replace(/\/$/, '');
+    const { baseUrl, apiKey } = this.requireConfig();
 
     return ctx.request.mode === 'video'
       ? this.generateVideo(ctx, baseUrl, apiKey)
@@ -163,6 +155,105 @@ export class ByteplusProvider implements GenerationProvider {
 
     const videoUrl = await this.pollVideoTask(baseUrl, apiKey, created.id);
     return [{ type: 'video', url: videoUrl }];
+  }
+
+  // ── Draft mode (480p preview → promote → full render) ──────────────────
+  supportsDraft(): boolean {
+    return true;
+  }
+
+  /**
+   * Create a cheap 480p draft. Same content + structured params as
+   * generateVideo, EXCEPT resolution is forced out (ModelArk errors if a draft
+   * carries any non-480p resolution) and `draft: true` is sent top-level. Polls
+   * to succeeded and returns the draft task id (for promotion) + preview url.
+   */
+  async createDraft(
+    ctx: GenerationContext,
+  ): Promise<{ draftTaskId: string; previewUrl: string }> {
+    const { baseUrl, apiKey } = this.requireConfig();
+    const model = this.resolveModel('video');
+
+    const content: TaskContentPart[] = [
+      { type: 'text', text: this.composeVideoPrompt(ctx) },
+    ];
+    for (const url of this.referenceImages(ctx)) {
+      content.push({ type: 'image_url', image_url: { url } });
+    }
+
+    // Drafts are 480p-only: drop any resolution the user picked; keep
+    // ratio/duration/seed/camera_fixed and generate_audio.
+    const params = this.videoParams(ctx);
+    delete params.resolution;
+
+    const created = await this.post<CreateTaskResponse>(
+      `${baseUrl}/contents/generations/tasks`,
+      apiKey,
+      {
+        model,
+        content,
+        ...params,
+        generate_audio: ctx.request.generateAudio ?? false,
+        draft: true,
+      },
+    );
+    this.logger.log(
+      `BytePlus draft task ${created.id} created (job ${ctx.jobId}).`,
+    );
+
+    const previewUrl = await this.pollVideoTask(baseUrl, apiKey, created.id);
+    return { draftTaskId: created.id, previewUrl };
+  }
+
+  /**
+   * Promote a draft to a full render. A NEW task that references the draft via
+   * a `draft_task` content part and inherits model/prompt/image/seed/ratio/
+   * duration/generate_audio from it; we override resolution (the user's target,
+   * default 720p) and watermark. Re-runs full inference (billed normally).
+   */
+  async promoteDraft(
+    ctx: GenerationContext,
+    draftTaskId: string,
+  ): Promise<GenerationOutput[]> {
+    const { baseUrl, apiKey } = this.requireConfig();
+    const model = this.resolveModel('video');
+
+    const target =
+      (this.videoParams(ctx).resolution as string | undefined) ?? '720p';
+
+    const created = await this.post<CreateTaskResponse>(
+      `${baseUrl}/contents/generations/tasks`,
+      apiKey,
+      {
+        model,
+        content: [
+          { type: 'draft_task', draft_task: { id: draftTaskId } },
+        ] as TaskContentPart[],
+        resolution: target,
+        watermark: false,
+      },
+    );
+    this.logger.log(
+      `BytePlus promote task ${created.id} from draft ${draftTaskId} ` +
+        `(job ${ctx.jobId}, ${target}).`,
+    );
+
+    const videoUrl = await this.pollVideoTask(baseUrl, apiKey, created.id);
+    return [{ type: 'video', url: videoUrl }];
+  }
+
+  /** Resolve API key + base URL, throwing if BytePlus is unconfigured. */
+  private requireConfig(): { baseUrl: string; apiKey: string } {
+    const apiKey = this.config.get<string>('BYTEPLUS_API_KEY');
+    if (!apiKey) {
+      throw new Error(
+        'BytePlus provider is not configured: set BYTEPLUS_API_KEY to enable real generation.',
+      );
+    }
+    const baseUrl = (
+      this.config.get<string>('BYTEPLUS_ENDPOINT') ?? this.defaultEndpoint
+    ).replace(/\/$/, '');
+    return { baseUrl, apiKey };
   }
 
   private async pollVideoTask(
@@ -391,6 +482,8 @@ interface TaskStatusResponse {
   /** queued | running | succeeded | failed | cancelled | expired */
   status: string;
   content?: { video_url?: string };
+  /** True when the task was created as a 480p draft. */
+  draft?: boolean;
   error?: { message?: string };
 }
 
@@ -400,7 +493,8 @@ interface ImageGenerationResponse {
 
 type TaskContentPart =
   | { type: 'text'; text: string }
-  | { type: 'image_url'; image_url: { url: string } };
+  | { type: 'image_url'; image_url: { url: string } }
+  | { type: 'draft_task'; draft_task: { id: string } };
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
