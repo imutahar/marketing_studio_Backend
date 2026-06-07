@@ -10,6 +10,7 @@ import { ProductInfo } from './extract.types';
 
 const TIMEOUT_MS = 8000;
 const MAX_BYTES = 2_000_000;
+const MAX_REDIRECTS = 3;
 const USER_AGENT =
   'Mozilla/5.0 (compatible; MarketingStudioBot/1.0; +https://salla.sa)';
 
@@ -62,6 +63,12 @@ export class ExtractService {
     } catch {
       throw new BadRequestException('رابط غير صالح.');
     }
+    return this.assertSafeUrl(url);
+  }
+
+  /** Enforce http(s) + non-private host on a parsed URL. Single source of
+   * truth, reused for both the original request and any redirect target. */
+  private assertSafeUrl(url: URL): URL {
     if (url.protocol !== 'http:' && url.protocol !== 'https:') {
       throw new BadRequestException('يُسمح بروابط http(s) فقط.');
     }
@@ -71,15 +78,25 @@ export class ExtractService {
     return url;
   }
 
-  private async fetchHtml(url: URL): Promise<string> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-    try {
-      const res = await fetch(url.toString(), {
-        signal: controller.signal,
-        redirect: 'follow',
-        headers: { 'User-Agent': USER_AGENT, Accept: 'text/html,*/*' },
-      });
+  private async fetchHtml(startUrl: URL): Promise<string> {
+    let url = startUrl;
+    for (let hop = 0; ; hop++) {
+      const res = await this.fetchOnce(url);
+      // Manually follow redirects so each target is re-validated (a redirect
+      // to a private/metadata IP would otherwise bypass the SSRF guard).
+      if (res.status >= 300 && res.status < 400) {
+        const location = res.headers.get('location');
+        if (!location) {
+          throw new ServiceUnavailableException(
+            `تعذّر الوصول للصفحة (رمز ${res.status}).`,
+          );
+        }
+        if (hop >= MAX_REDIRECTS) {
+          throw new ServiceUnavailableException('تعذّر قراءة الرابط.');
+        }
+        url = this.resolveRedirect(location, url);
+        continue;
+      }
       if (!res.ok) {
         throw new ServiceUnavailableException(
           `تعذّر الوصول للصفحة (رمز ${res.status}).`,
@@ -90,13 +107,38 @@ export class ExtractService {
         throw new UnprocessableEntityException('الرابط ليس صفحة ويب.');
       }
       return await readCapped(res, MAX_BYTES);
+    }
+  }
+
+  /** Resolve and re-validate a redirect Location against the same guard. */
+  private resolveRedirect(location: string, base: URL): URL {
+    let target: URL;
+    try {
+      target = new URL(location, base);
+    } catch {
+      throw new BadRequestException('رابط غير صالح.');
+    }
+    return this.assertSafeUrl(target);
+  }
+
+  /** A single fetch hop with its own abort timeout and no auto-redirects. */
+  private async fetchOnce(url: URL): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    try {
+      return await fetch(url.toString(), {
+        signal: controller.signal,
+        redirect: 'manual',
+        headers: { 'User-Agent': USER_AGENT, Accept: 'text/html,*/*' },
+      });
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
         throw new ServiceUnavailableException('انتهت مهلة قراءة الصفحة.');
       }
       if (
         err instanceof ServiceUnavailableException ||
-        err instanceof UnprocessableEntityException
+        err instanceof UnprocessableEntityException ||
+        err instanceof BadRequestException
       ) {
         throw err;
       }
