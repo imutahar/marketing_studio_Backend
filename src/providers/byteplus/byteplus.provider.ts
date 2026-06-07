@@ -9,8 +9,11 @@ import { parseDurationSeconds } from '../../common/duration';
  * between polls (pollTimeoutMs), but a SINGLE hung fetch must not block
  * indefinitely and pin a job in 'processing' forever. Kept well under the
  * poll cadence so a stuck request fails fast and the loop can recover.
+ * Note: image generation (Seedream) is synchronous — the POST stays open
+ * until the image is ready, which at 4K can take ~30-60s — so this must be
+ * generous enough for the largest image size.
  */
-const REQUEST_TIMEOUT_MS = 30_000;
+const REQUEST_TIMEOUT_MS = 120_000;
 
 /**
  * BytePlus (ModelArk / Seedance) provider.
