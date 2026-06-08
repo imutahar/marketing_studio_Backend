@@ -22,6 +22,7 @@ import {
   resolveCapability,
 } from '../common/generation.types';
 import { parseDurationSeconds } from '../common/duration';
+import { Semaphore } from '../common/semaphore';
 import { Asset } from './asset.types';
 
 const IMAGE_TOKEN_COST = 20;
@@ -33,6 +34,11 @@ const DRAFT_COST_MULTIPLIER = 0.6;
 const DRAFT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 /** Default hard daily cap on generations (cost backstop) when env is unset. */
 const DEFAULT_MAX_GENERATIONS_PER_DAY = 200;
+/**
+ * Default cap on generations calling the provider at once; bounds simultaneous
+ * paid BytePlus calls + long video poll loops. Extra jobs queue (stay 'queued').
+ */
+const DEFAULT_MAX_CONCURRENT_GENERATIONS = 4;
 
 @Injectable()
 export class GenerationService {
@@ -42,6 +48,13 @@ export class GenerationService {
   private readonly maxGenerationsPerDay: number;
   /** In-memory daily counter (resets on restart; acceptable for a backstop). */
   private dailyUsage = { date: this.today(), count: 0 };
+
+  /**
+   * Bounds how many generations hit the provider at once (paid BytePlus calls +
+   * long video poll loops). Extra jobs wait here and stay 'queued'. In-memory,
+   * per instance.
+   */
+  private readonly limiter: Semaphore;
 
   constructor(
     private readonly store: JobStore,
@@ -53,6 +66,10 @@ export class GenerationService {
   ) {
     this.maxGenerationsPerDay = Number(
       config.get('MAX_GENERATIONS_PER_DAY') ?? DEFAULT_MAX_GENERATIONS_PER_DAY,
+    );
+    this.limiter = new Semaphore(
+      config.get<number>('MAX_CONCURRENT_GENERATIONS') ??
+        DEFAULT_MAX_CONCURRENT_GENERATIONS,
     );
   }
 
@@ -159,8 +176,11 @@ export class GenerationService {
     const job = this.store.get(jobId);
     if (!job) return;
 
-    this.store.update(jobId, { status: 'processing' });
+    // Wait for a provider slot before going 'processing' so queued jobs that
+    // are still waiting stay 'queued' (making the status meaningful).
+    await this.limiter.acquire();
     try {
+      this.store.update(jobId, { status: 'processing' });
       // INPUTS: ModelArk needs publicly reachable image URLs. Merchant uploads
       // arrive as base64 data URIs, so re-host them on Blob (best-effort) and
       // swap the durable URL into the request the provider receives.
@@ -189,6 +209,8 @@ export class GenerationService {
       const message = err instanceof Error ? err.message : 'Unknown error';
       this.logger.error(`Job ${jobId} failed: ${message}`);
       this.store.update(jobId, { status: 'failed', error: message });
+    } finally {
+      this.limiter.release();
     }
   }
 
@@ -205,8 +227,11 @@ export class GenerationService {
     const job = this.store.get(jobId);
     if (!job) return;
 
-    this.store.update(jobId, { status: 'processing' });
+    // Wait for a provider slot before going 'processing' so queued jobs that
+    // are still waiting stay 'queued' (making the status meaningful).
+    await this.limiter.acquire();
     try {
+      this.store.update(jobId, { status: 'processing' });
       if (this.storage.isEnabled()) {
         await this.persistInputs(jobId, job);
       }
@@ -244,6 +269,8 @@ export class GenerationService {
       const message = err instanceof Error ? err.message : 'Unknown error';
       this.logger.error(`Draft ${jobId} failed: ${message}`);
       this.store.update(jobId, { status: 'failed', error: message });
+    } finally {
+      this.limiter.release();
     }
   }
 
@@ -292,6 +319,9 @@ export class GenerationService {
   ): Promise<void> {
     const job = this.store.get(jobId);
     if (!job) return;
+    // approve() already set status to 'processing'; still gate the provider call
+    // behind the limiter so promotions count against the concurrency budget.
+    await this.limiter.acquire();
     try {
       if (!provider.promoteDraft) {
         throw new Error(`Provider ${provider.name} does not support drafts.`);
@@ -315,6 +345,8 @@ export class GenerationService {
       const message = err instanceof Error ? err.message : 'Unknown error';
       this.logger.error(`Promotion ${jobId} failed: ${message}`);
       this.store.update(jobId, { status: 'failed', error: message });
+    } finally {
+      this.limiter.release();
     }
   }
 
