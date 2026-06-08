@@ -112,6 +112,21 @@ export class GenerationService {
     return this.store.list().filter((j) => j.projectId === projectId);
   }
 
+  /**
+   * Move a generation into a project ("save to project"). Validates the target
+   * project exists, repoints the job, and records it so the project's
+   * count/thumbnail reflect the move. Returns the updated job.
+   */
+  assignProject(id: string, projectId: string): Job {
+    const job = this.get(id);
+    if (!this.projects.tryGet(projectId)) {
+      throw new BadRequestException('Project not found.');
+    }
+    const updated = this.store.update(id, { projectId }) ?? job;
+    this.projects.recordGeneration(projectId, job.outputs?.[0]?.url);
+    return updated;
+  }
+
   /** Flatten every successful output into a global asset library, newest first. */
   listAssets(): Asset[] {
     const assets: Asset[] = [];
