@@ -50,7 +50,7 @@ describe('Marketing Studio backend (e2e)', () => {
       .send({
         mode: 'video',
         prompt: 'إعلان فيديو لمنتج',
-        options: ['12s', '9:16'],
+        options: { duration: '12 ث', ratio: '9:16', resolution: '1080p' },
       })
       .expect(202);
 

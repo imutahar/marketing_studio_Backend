@@ -108,10 +108,10 @@ export class AdReferenceService {
           mode: 'video',
           prompt: scriptToPrompt(ref.script),
           projectId: dto.projectId,
-          options: [
-            dto.resolution ?? '720p',
-            dto.aspectRatio ?? ref.script.aspectRatio,
-          ],
+          options: {
+            resolution: dto.resolution ?? '720p',
+            ratio: dto.aspectRatio ?? ref.script.aspectRatio,
+          },
           attachments,
         },
         // Internal call: the generated jobs inherit the reference's owner.

@@ -357,15 +357,12 @@ export class ByteplusProvider implements GenerationProvider {
    * embedded here — they go in the structured task body via videoParams().
    */
   private composeVideoPrompt(ctx: GenerationContext): string {
-    const descriptors: string[] = [];
-    for (const opt of ctx.request.options) {
-      // Skip values carried by structured params; keep style descriptors.
-      const isParam =
-        parseDurationSeconds([opt]) !== undefined ||
-        /^\d+:\d+$/.test(opt) ||
-        /^\d+p$/i.test(opt);
-      if (!isParam) descriptors.push(opt); // e.g. نوع الفيديو
-    }
+    const o = ctx.request.options;
+    // Keyed options: every entry EXCEPT the structured video-param keys is a
+    // style descriptor (its value is folded into the prompt). e.g. نوع الفيديو
+    const descriptors: string[] = Object.entries(o)
+      .filter(([k]) => !['duration', 'ratio', 'resolution'].includes(k))
+      .map(([, v]) => v);
 
     // Fold the chosen character/avatar into the prompt so it shapes the video.
     const character = this.characterName(ctx);
@@ -384,16 +381,14 @@ export class ByteplusProvider implements GenerationProvider {
    */
   private videoParams(ctx: GenerationContext): Record<string, unknown> {
     const params: Record<string, unknown> = {};
-    for (const opt of ctx.request.options) {
-      const duration = parseDurationSeconds([opt]); // "12s" or "12 ث"
-      if (duration !== undefined) {
-        params.duration = duration;
-      } else if (ALLOWED_VIDEO_RATIOS.has(opt)) {
-        params.ratio = opt;
-      } else if (ALLOWED_VIDEO_RESOLUTIONS.has(opt.toLowerCase())) {
-        params.resolution = opt.toLowerCase();
-      }
-    }
+    const o = ctx.request.options;
+    // Read structured params by their select-id key (not by guessing from a
+    // positional list); out-of-range values are dropped so the model defaults.
+    const duration = parseDurationSeconds(o.duration); // "12s" or "12 ث"
+    if (duration !== undefined) params.duration = duration;
+    if (o.ratio && ALLOWED_VIDEO_RATIOS.has(o.ratio)) params.ratio = o.ratio;
+    const res = o.resolution?.toLowerCase();
+    if (res && ALLOWED_VIDEO_RESOLUTIONS.has(res)) params.resolution = res;
     if (ctx.request.cameraFixed !== undefined) {
       params.camera_fixed = ctx.request.cameraFixed;
     }
@@ -403,7 +398,9 @@ export class ByteplusProvider implements GenerationProvider {
 
   /** Image prompt enriched with the selected options (language, format, …). */
   private composeImagePrompt(ctx: GenerationContext): string {
-    const descriptors = [...ctx.request.options];
+    // Image mode has no structured param keys today, so every option VALUE is a
+    // style descriptor (language, format, …).
+    const descriptors = Object.values(ctx.request.options);
     if (ctx.request.negativePrompt)
       descriptors.push(`تجنّب: ${ctx.request.negativePrompt}`);
     return styleText(ctx.request.prompt, descriptors);

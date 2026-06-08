@@ -19,6 +19,7 @@ import {
   GenerationOutput,
   GenerationRequest,
   Job,
+  normalizeOptions,
   resolveCapability,
 } from '../common/generation.types';
 import { parseDurationSeconds } from '../common/duration';
@@ -406,7 +407,7 @@ export class GenerationService {
     return {
       mode: dto.mode,
       prompt,
-      options: dto.options ?? [],
+      options: normalizeOptions(dto.options),
       attachments: dto.attachments ?? [],
       negativePrompt: dto.negativePrompt,
       seed: dto.seed,
@@ -447,7 +448,8 @@ export class GenerationService {
   private tokenCost(job: Job): number {
     if (job.request.mode === 'video') {
       const seconds =
-        parseDurationSeconds(job.request.options) ?? DEFAULT_VIDEO_SECONDS;
+        parseDurationSeconds(job.request.options.duration) ??
+        DEFAULT_VIDEO_SECONDS;
       return seconds * VIDEO_TOKENS_PER_SECOND;
     }
     return IMAGE_TOKEN_COST;

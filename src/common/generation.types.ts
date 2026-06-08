@@ -23,7 +23,12 @@ export interface AttachmentInput {
 export interface GenerationRequest {
   mode: GenerationMode;
   prompt: string;
-  options: string[];
+  /**
+   * Toolbar selections keyed by select id (e.g. `duration`, `ratio`,
+   * `resolution`, or any style descriptor key). Keyed (not positional) so a
+   * chip reorder can't silently shift a value into the wrong slot.
+   */
+  options: Record<string, string>;
   attachments: AttachmentInput[];
   /** Advanced settings. */
   negativePrompt?: string;
@@ -68,6 +73,26 @@ export interface Job {
   projectId?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * Coerce a raw `options` payload into the keyed object the pipeline expects.
+ *
+ * Rollout safety: this deploys BEFORE the new frontend, so old clients may
+ * still POST a positional `string[]`. We tolerate that without crashing or
+ * 400ing — a non-null, non-Array object is used as-is (values coerced to
+ * strings); ANYTHING else (legacy array, null, string, number, …) collapses to
+ * `{}`, so video params just fall back to model defaults for the brief window.
+ */
+export function normalizeOptions(raw: unknown): Record<string, string> {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return {};
+  }
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    out[key] = typeof value === 'string' ? value : String(value);
+  }
+  return out;
 }
 
 /** Derive the capability from the request shape (input present ⇒ image-to-*). */
