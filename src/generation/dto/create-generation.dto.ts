@@ -43,10 +43,14 @@ export class CreateGenerationDto {
   @IsString()
   projectId?: string;
 
+  /**
+   * Toolbar selections keyed by select id. Left lightly validated on purpose:
+   * we do NOT add `@IsObject()` because legacy clients still send a positional
+   * array and that would 400 them during the rollout window. The service
+   * normalizes the shape (array → {}) instead.
+   */
   @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  options?: string[];
+  options?: Record<string, string>;
 
   @IsOptional()
   @IsArray()

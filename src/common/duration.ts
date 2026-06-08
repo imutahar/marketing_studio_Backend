@@ -5,14 +5,12 @@
 const DURATION_PATTERN = /^(\d+)\s*(?:s|ث)$/;
 
 /**
- * Extract the selected video duration (in seconds) from the options, if any.
- * Returns `undefined` when no option encodes a duration, so callers can apply
- * their own default (or omit the value entirely).
+ * Extract a video duration (in seconds) from a single option value, if it
+ * encodes one. Returns `undefined` when the value is absent or doesn't match,
+ * so callers can apply their own default (or omit the value entirely).
  */
-export function parseDurationSeconds(options: string[]): number | undefined {
-  for (const opt of options) {
-    const match = opt.match(DURATION_PATTERN);
-    if (match) return Number(match[1]);
-  }
-  return undefined;
+export function parseDurationSeconds(value?: string): number | undefined {
+  if (!value) return undefined;
+  const match = value.match(DURATION_PATTERN);
+  return match ? Number(match[1]) : undefined;
 }
