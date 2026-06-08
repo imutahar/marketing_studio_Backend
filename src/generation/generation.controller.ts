@@ -5,10 +5,12 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Patch,
   Post,
 } from '@nestjs/common';
 import { GenerationService } from './generation.service';
 import { CreateGenerationDto } from './dto/create-generation.dto';
+import { AssignProjectDto } from './dto/assign-project.dto';
 
 @Controller('generations')
 export class GenerationController {
@@ -36,5 +38,11 @@ export class GenerationController {
   @HttpCode(HttpStatus.ACCEPTED)
   approve(@Param('id') id: string) {
     return this.service.approve(id);
+  }
+
+  /** Move a generation into a project ("save to project"). Returns the job. */
+  @Patch(':id/project')
+  assignProject(@Param('id') id: string, @Body() dto: AssignProjectDto) {
+    return this.service.assignProject(id, dto.projectId);
   }
 }
