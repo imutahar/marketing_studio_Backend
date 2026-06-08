@@ -31,10 +31,11 @@ export class AdReferenceService {
 
   constructor(private readonly generation: GenerationService) {}
 
-  create(dto: CreateAdReferenceDto): AdReference {
+  create(dto: CreateAdReferenceDto, ownerId: string): AdReference {
     const now = new Date().toISOString();
     const ref: AdReference = {
       id: randomUUID(),
+      ownerId,
       status: 'analyzing',
       progress: 0,
       referenceVideoUrl: dto.referenceVideoUrl,
@@ -50,14 +51,16 @@ export class AdReferenceService {
     return ref;
   }
 
-  get(id: string): AdReference {
+  get(id: string, ownerId: string): AdReference {
     const ref = this.store.get(id);
-    if (!ref) throw new NotFoundException(`Ad reference "${id}" not found.`);
+    if (!ref || ref.ownerId !== ownerId) {
+      throw new NotFoundException(`Ad reference "${id}" not found.`);
+    }
     return ref;
   }
 
-  updateScript(id: string, dto: UpdateScriptDto): AdReference {
-    this.get(id); // ensure it exists
+  updateScript(id: string, dto: UpdateScriptDto, ownerId: string): AdReference {
+    this.get(id, ownerId); // ensure it exists and belongs to the owner
     return this.update(id, { script: dto, status: 'ready' });
   }
 
@@ -65,8 +68,9 @@ export class AdReferenceService {
   generate(
     id: string,
     dto: GenerateAdReferenceDto,
+    ownerId: string,
   ): { generationId: string; generationIds: string[] } {
-    const ref = this.get(id);
+    const ref = this.get(id, ownerId);
     if (!ref.script) {
       throw new BadRequestException('Script is not ready yet.');
     }
@@ -99,16 +103,20 @@ export class AdReferenceService {
     const count = dto.variations ?? 1;
     const generationIds: string[] = [];
     for (let i = 0; i < count; i++) {
-      const generation = this.generation.create({
-        mode: 'video',
-        prompt: scriptToPrompt(ref.script),
-        projectId: dto.projectId,
-        options: [
-          dto.resolution ?? '720p',
-          dto.aspectRatio ?? ref.script.aspectRatio,
-        ],
-        attachments,
-      });
+      const generation = this.generation.create(
+        {
+          mode: 'video',
+          prompt: scriptToPrompt(ref.script),
+          projectId: dto.projectId,
+          options: [
+            dto.resolution ?? '720p',
+            dto.aspectRatio ?? ref.script.aspectRatio,
+          ],
+          attachments,
+        },
+        // Internal call: the generated jobs inherit the reference's owner.
+        ref.ownerId,
+      );
       generationIds.push(generation.id);
     }
 
@@ -136,7 +144,12 @@ export class AdReferenceService {
   }
 
   private update(id: string, patch: Partial<AdReference>): AdReference {
-    const existing = this.get(id);
+    // Internal mutator (runs server-side, e.g. from the async analyze loop), so
+    // it reads straight from the store rather than the owner-scoped get().
+    const existing = this.store.get(id);
+    if (!existing) {
+      throw new NotFoundException(`Ad reference "${id}" not found.`);
+    }
     const updated: AdReference = {
       ...existing,
       ...patch,

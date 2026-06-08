@@ -11,6 +11,7 @@ import {
 import { GenerationService } from './generation.service';
 import { CreateGenerationDto } from './dto/create-generation.dto';
 import { AssignProjectDto } from './dto/assign-project.dto';
+import { CurrentUser } from '../common/current-user.decorator';
 
 @Controller('generations')
 export class GenerationController {
@@ -19,30 +20,34 @@ export class GenerationController {
   /** Start a generation job. Returns 202 with the queued job. */
   @Post()
   @HttpCode(HttpStatus.ACCEPTED)
-  create(@Body() dto: CreateGenerationDto) {
-    return this.service.create(dto);
+  create(@Body() dto: CreateGenerationDto, @CurrentUser() ownerId: string) {
+    return this.service.create(dto, ownerId);
   }
 
   @Get()
-  list() {
-    return this.service.list();
+  list(@CurrentUser() ownerId: string) {
+    return this.service.list(ownerId);
   }
 
   @Get(':id')
-  get(@Param('id') id: string) {
-    return this.service.get(id);
+  get(@Param('id') id: string, @CurrentUser() ownerId: string) {
+    return this.service.get(id, ownerId);
   }
 
   /** Approve a draft_ready job and kick off the full render. Returns 202. */
   @Post(':id/approve')
   @HttpCode(HttpStatus.ACCEPTED)
-  approve(@Param('id') id: string) {
-    return this.service.approve(id);
+  approve(@Param('id') id: string, @CurrentUser() ownerId: string) {
+    return this.service.approve(id, ownerId);
   }
 
   /** Move a generation into a project ("save to project"). Returns the job. */
   @Patch(':id/project')
-  assignProject(@Param('id') id: string, @Body() dto: AssignProjectDto) {
-    return this.service.assignProject(id, dto.projectId);
+  assignProject(
+    @Param('id') id: string,
+    @Body() dto: AssignProjectDto,
+    @CurrentUser() ownerId: string,
+  ) {
+    return this.service.assignProject(id, dto.projectId, ownerId);
   }
 }

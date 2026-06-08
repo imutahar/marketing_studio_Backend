@@ -52,6 +52,8 @@ export interface GenerationOutput {
 
 export interface Job {
   id: string;
+  /** Owning tenant. Single hard-coded owner today (see DEFAULT_OWNER). */
+  ownerId: string;
   status: JobStatus;
   capability: Capability;
   request: GenerationRequest;

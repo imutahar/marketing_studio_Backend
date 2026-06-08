@@ -10,6 +10,8 @@ export interface BrandAsset {
 
 export interface Project {
   id: string;
+  /** Owning tenant. Single hard-coded owner today (see DEFAULT_OWNER). */
+  ownerId: string;
   name: string;
   /** Free-text rules the AI should always follow for this project. */
   instructions?: string;

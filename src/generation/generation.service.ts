@@ -57,10 +57,10 @@ export class GenerationService {
   }
 
   /** Create a job and kick off generation asynchronously (clients poll status). */
-  create(dto: CreateGenerationDto): Job {
+  create(dto: CreateGenerationDto, ownerId: string): Job {
     this.enforceDailyCap();
 
-    const request = this.applyProjectContext(dto);
+    const request = this.applyProjectContext(dto, ownerId);
 
     const capability = resolveCapability(request);
     const provider = this.registry.resolve(capability);
@@ -68,6 +68,7 @@ export class GenerationService {
 
     const job: Job = {
       id: randomUUID(),
+      ownerId,
       status: 'queued',
       capability,
       request,
@@ -98,18 +99,22 @@ export class GenerationService {
     return job;
   }
 
-  get(id: string): Job {
+  get(id: string, ownerId: string): Job {
     const job = this.store.get(id);
-    if (!job) throw new NotFoundException(`Generation "${id}" not found.`);
+    if (!job || job.ownerId !== ownerId) {
+      throw new NotFoundException(`Generation "${id}" not found.`);
+    }
     return job;
   }
 
-  list(): Job[] {
-    return this.store.list();
+  list(ownerId: string): Job[] {
+    return this.store.list().filter((j) => j.ownerId === ownerId);
   }
 
-  listByProject(projectId: string): Job[] {
-    return this.store.list().filter((j) => j.projectId === projectId);
+  listByProject(projectId: string, ownerId: string): Job[] {
+    return this.store
+      .list()
+      .filter((j) => j.ownerId === ownerId && j.projectId === projectId);
   }
 
   /**
@@ -117,9 +122,9 @@ export class GenerationService {
    * project exists, repoints the job, and records it so the project's
    * count/thumbnail reflect the move. Returns the updated job.
    */
-  assignProject(id: string, projectId: string): Job {
-    const job = this.get(id);
-    if (!this.projects.tryGet(projectId)) {
+  assignProject(id: string, projectId: string, ownerId: string): Job {
+    const job = this.get(id, ownerId);
+    if (!this.projects.tryGet(projectId, ownerId)) {
       throw new BadRequestException('Project not found.');
     }
     const updated = this.store.update(id, { projectId }) ?? job;
@@ -128,9 +133,10 @@ export class GenerationService {
   }
 
   /** Flatten every successful output into a global asset library, newest first. */
-  listAssets(): Asset[] {
+  listAssets(ownerId: string): Asset[] {
     const assets: Asset[] = [];
     for (const job of this.store.list()) {
+      if (job.ownerId !== ownerId) continue;
       if (job.status !== 'succeeded') continue;
       job.outputs.forEach((out, i) => {
         assets.push({
@@ -246,9 +252,11 @@ export class GenerationService {
    * user's target resolution. Validates the draft state + 7-day window, then
    * runs the promotion fire-and-forget (like create()) so the client polls.
    */
-  approve(id: string): Job {
+  approve(id: string, ownerId: string): Job {
     const job = this.store.get(id);
-    if (!job) throw new NotFoundException(`Generation "${id}" not found.`);
+    if (!job || job.ownerId !== ownerId) {
+      throw new NotFoundException(`Generation "${id}" not found.`);
+    }
     if (job.status !== 'draft_ready') {
       throw new BadRequestException(
         `Generation "${id}" is not awaiting approval (status: ${job.status}).`,
@@ -352,10 +360,13 @@ export class GenerationService {
    * Fold the project's brand kit into the request so the AI always honors it.
    * Instructions are prepended to the prompt (reliable, model-agnostic).
    */
-  private applyProjectContext(dto: CreateGenerationDto): GenerationRequest {
+  private applyProjectContext(
+    dto: CreateGenerationDto,
+    ownerId: string,
+  ): GenerationRequest {
     let prompt = dto.prompt;
     if (dto.projectId) {
-      const project = this.projects.tryGet(dto.projectId);
+      const project = this.projects.tryGet(dto.projectId, ownerId);
       if (project?.instructions) {
         prompt = `${project.instructions}\n\n${prompt}`;
       }
@@ -382,6 +393,9 @@ export class GenerationService {
    * Cost backstop: bound total generations/day regardless of caller. Resets the
    * counter when the day rolls over, then throws 429 once the cap is hit.
    * Counts every create() (image + video). In-memory; resets on restart.
+   *
+   * TODO(multitenancy): key the daily cap by ownerId so one tenant can't
+   * exhaust another's budget; global single-owner counter is fine today.
    */
   private enforceDailyCap(): void {
     const today = this.today();

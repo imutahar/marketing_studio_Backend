@@ -1,5 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import { GenerationService } from './generation.service';
+import { CurrentUser } from '../common/current-user.decorator';
 import type { Asset } from './asset.types';
 
 @Controller('assets')
@@ -8,7 +9,7 @@ export class AssetsController {
 
   /** Global asset library — every generated output, newest first. */
   @Get()
-  list(): Asset[] {
-    return this.generation.listAssets();
+  list(@CurrentUser() ownerId: string): Asset[] {
+    return this.generation.listAssets(ownerId);
   }
 }

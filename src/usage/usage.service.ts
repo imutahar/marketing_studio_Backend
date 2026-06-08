@@ -7,6 +7,9 @@ import { UsageSummary } from './usage.types';
  *
  * In-memory for now (resets on restart); swap for a DB-backed per-merchant
  * counter later. Plan size and starting usage are env-configurable.
+ *
+ * TODO(multitenancy): key usage + the generation daily cap by ownerId. Today
+ * usage is global (single owner), so consume()/getSummary() take no ownerId.
  */
 @Injectable()
 export class UsageService {
