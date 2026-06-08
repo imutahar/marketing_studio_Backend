@@ -73,7 +73,8 @@ export class GenerationService {
       request,
       provider: provider.name,
       outputs: [],
-      projectId: dto.projectId,
+      // No project chosen → land in the default workspace so it's never orphaned.
+      projectId: dto.projectId ?? this.projects.defaultProjectId(),
       createdAt: now,
       updatedAt: now,
     };
