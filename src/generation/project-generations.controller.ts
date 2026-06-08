@@ -1,5 +1,6 @@
 import { Controller, Get, Param } from '@nestjs/common';
 import { GenerationService } from './generation.service';
+import { CurrentUser } from '../common/current-user.decorator';
 
 /** Lives in the generation module (has GenerationService) — exposes a
  *  project's generations without coupling ProjectsModule to generation. */
@@ -8,7 +9,7 @@ export class ProjectGenerationsController {
   constructor(private readonly generation: GenerationService) {}
 
   @Get(':id/generations')
-  byProject(@Param('id') id: string) {
-    return this.generation.listByProject(id);
+  byProject(@Param('id') id: string, @CurrentUser() ownerId: string) {
+    return this.generation.listByProject(id, ownerId);
   }
 }

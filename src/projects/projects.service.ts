@@ -6,6 +6,7 @@ import {
 import { randomUUID } from 'crypto';
 import { CreateProjectDto, UpdateProjectDto } from './dto/projects.dto';
 import { Project, ProjectDetail, ProjectSummary } from './projects.types';
+import { DEFAULT_OWNER } from '../common/owner';
 
 /** Stored project = brand kit + lightweight generation counters. */
 type ProjectRecord = Project & { generationCount: number; thumbnail?: string };
@@ -30,6 +31,7 @@ export class ProjectsService {
       const id = randomUUID();
       this.store.set(id, {
         id,
+        ownerId: DEFAULT_OWNER,
         name,
         brandAssets: [],
         generationCount: 0,
@@ -45,6 +47,7 @@ export class ProjectsService {
     this.defaultId = randomUUID();
     this.store.set(this.defaultId, {
       id: this.defaultId,
+      ownerId: DEFAULT_OWNER,
       name: 'عام',
       brandAssets: [],
       generationCount: 0,
@@ -59,10 +62,11 @@ export class ProjectsService {
     return this.defaultId;
   }
 
-  create(dto: CreateProjectDto): ProjectDetail {
+  create(dto: CreateProjectDto, ownerId: string): ProjectDetail {
     const now = new Date().toISOString();
     const record: ProjectRecord = {
       id: randomUUID(),
+      ownerId,
       name: dto.name.trim(),
       instructions: dto.instructions?.trim() || undefined,
       brandAssets: dto.brandAssets ?? [],
@@ -74,24 +78,31 @@ export class ProjectsService {
     return this.detail(record);
   }
 
-  list(): ProjectSummary[] {
+  list(ownerId: string): ProjectSummary[] {
     return Array.from(this.store.values())
+      .filter((p) => p.ownerId === ownerId)
       .filter((p) => !p.isDefault) // the default workspace isn't a user project
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .map((p) => this.summarize(p));
   }
 
-  get(id: string): ProjectDetail {
-    return this.detail(this.require(id));
+  get(id: string, ownerId: string): ProjectDetail {
+    return this.detail(this.require(id, ownerId));
   }
 
-  /** Project for generation context — undefined instead of throwing. */
-  tryGet(id: string): Project | undefined {
-    return this.store.get(id);
+  /**
+   * Project for generation context — undefined instead of throwing. Owner-scoped
+   * so a project is only visible to its owner. Called server-side by the
+   * generation pipeline, which passes the owning job's ownerId.
+   */
+  tryGet(id: string, ownerId: string): Project | undefined {
+    const project = this.store.get(id);
+    if (!project || project.ownerId !== ownerId) return undefined;
+    return project;
   }
 
-  update(id: string, dto: UpdateProjectDto): ProjectDetail {
-    const project = this.require(id);
+  update(id: string, dto: UpdateProjectDto, ownerId: string): ProjectDetail {
+    const project = this.require(id, ownerId);
     const updated: ProjectRecord = {
       ...project,
       name: dto.name?.trim() ?? project.name,
@@ -106,9 +117,11 @@ export class ProjectsService {
     return this.detail(updated);
   }
 
-  remove(id: string): void {
+  remove(id: string, ownerId: string): void {
     const record = this.store.get(id);
-    if (!record) throw new NotFoundException(`Project "${id}" not found.`);
+    if (!record || record.ownerId !== ownerId) {
+      throw new NotFoundException(`Project "${id}" not found.`);
+    }
     if (record.isDefault) {
       throw new BadRequestException('Cannot delete the default workspace.');
     }
@@ -124,9 +137,11 @@ export class ProjectsService {
     this.store.set(projectId, record);
   }
 
-  private require(id: string): ProjectRecord {
+  private require(id: string, ownerId: string): ProjectRecord {
     const project = this.store.get(id);
-    if (!project) throw new NotFoundException(`Project "${id}" not found.`);
+    if (!project || project.ownerId !== ownerId) {
+      throw new NotFoundException(`Project "${id}" not found.`);
+    }
     return project;
   }
 
@@ -146,6 +161,7 @@ export class ProjectsService {
   private detail(p: ProjectRecord): ProjectDetail {
     return {
       id: p.id,
+      ownerId: p.ownerId,
       name: p.name,
       instructions: p.instructions,
       brandAssets: p.brandAssets,

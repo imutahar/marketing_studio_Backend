@@ -19,6 +19,8 @@ export interface AdScript {
 
 export interface AdReference {
   id: string;
+  /** Owning tenant. Single hard-coded owner today (see DEFAULT_OWNER). */
+  ownerId: string;
   status: AdReferenceStatus;
   /** 0–100 analysis progress. */
   progress: number;
