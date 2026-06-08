@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { CreateProjectDto, UpdateProjectDto } from './dto/projects.dto';
 import { Project, ProjectDetail, ProjectSummary } from './projects.types';
@@ -17,6 +21,8 @@ type ProjectRecord = Project & { generationCount: number; thumbnail?: string };
 @Injectable()
 export class ProjectsService {
   private readonly store = new Map<string, ProjectRecord>();
+  /** Catch-all workspace id; generations without a project land here. */
+  private readonly defaultId: string;
 
   constructor() {
     for (const name of ['شاور جل', 'شامبو', 'شنطة سفر']) {
@@ -31,6 +37,26 @@ export class ProjectsService {
         updatedAt: now,
       });
     }
+
+    // A single always-present default workspace so a generation created without
+    // a project is still organized (never orphaned) — hidden from the project
+    // list, surfaced via the global asset library and a future "Uncategorized".
+    const now = new Date().toISOString();
+    this.defaultId = randomUUID();
+    this.store.set(this.defaultId, {
+      id: this.defaultId,
+      name: 'عام',
+      brandAssets: [],
+      generationCount: 0,
+      isDefault: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  /** Id of the catch-all workspace for project-less generations. */
+  defaultProjectId(): string {
+    return this.defaultId;
   }
 
   create(dto: CreateProjectDto): ProjectDetail {
@@ -50,6 +76,7 @@ export class ProjectsService {
 
   list(): ProjectSummary[] {
     return Array.from(this.store.values())
+      .filter((p) => !p.isDefault) // the default workspace isn't a user project
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .map((p) => this.summarize(p));
   }
@@ -80,9 +107,12 @@ export class ProjectsService {
   }
 
   remove(id: string): void {
-    if (!this.store.delete(id)) {
-      throw new NotFoundException(`Project "${id}" not found.`);
+    const record = this.store.get(id);
+    if (!record) throw new NotFoundException(`Project "${id}" not found.`);
+    if (record.isDefault) {
+      throw new BadRequestException('Cannot delete the default workspace.');
     }
+    this.store.delete(id);
   }
 
   /** Called by the generation pipeline when a project's job succeeds. */

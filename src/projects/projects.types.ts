@@ -14,6 +14,8 @@ export interface Project {
   /** Free-text rules the AI should always follow for this project. */
   instructions?: string;
   brandAssets: BrandAsset[];
+  /** The catch-all workspace for generations created without a project. */
+  isDefault?: boolean;
   createdAt: string;
   updatedAt: string;
 }
