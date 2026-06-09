@@ -420,15 +420,24 @@ export class ByteplusProvider implements GenerationProvider {
   /** Image prompt enriched with the selected options (language, format, …). */
   private composeImagePrompt(ctx: GenerationContext): string {
     const o = ctx.request.options;
-    // Option values become style descriptors (imageType, …) EXCEPT keys that
-    // drive real parameters rather than prompt text:
-    //  - "language"   → a clear text-rendering instruction (below)
+    // Option values become style descriptors EXCEPT keys handled specially
+    // below (they drive real params or a clearer instruction, not raw text):
+    //  - "language"   → a clear text-rendering instruction
     //  - "format"     → the real image size/aspect
     //  - "variations" → the number of images requested
-    const structuralKeys = new Set(['language', 'format', 'variations']);
+    //  - "imageType"  → an enriched style phrase ("auto" → nothing)
+    const structuralKeys = new Set([
+      'language',
+      'format',
+      'variations',
+      'imageType',
+    ]);
     const descriptors = Object.entries(o)
       .filter(([key]) => !structuralKeys.has(key))
       .map(([, value]) => value);
+
+    const styleRule = imageStyleRule(o.imageType);
+    if (styleRule) descriptors.push(styleRule);
 
     const languageRule = imageTextLanguageRule(o.language);
     if (languageRule) descriptors.push(languageRule);
@@ -533,6 +542,26 @@ function delay(ms: number): Promise<void> {
 function styleText(prompt: string, descriptors: string[]): string {
   const extras = descriptors.filter((d) => d && d.trim().length > 0);
   return extras.length ? `${prompt} — ${extras.join('، ')}` : prompt;
+}
+
+/**
+ * Turn the image "نوع الصورة" option into a clear style phrase. The default
+ * "تلقائي" (automatic) maps to NOTHING — appending the literal word "automatic"
+ * is prompt noise that nudges the model for no reason. The real choices become
+ * proper style instructions instead of bare tokens.
+ */
+function imageStyleRule(value: string | undefined): string | undefined {
+  switch (value) {
+    case 'واقعي':
+      return 'بأسلوب واقعي فوتوغرافي';
+    case 'ثلاثي الأبعاد':
+      return 'بتصميم ثلاثي الأبعاد (3D render)';
+    case 'رسومي':
+      return 'بأسلوب رسومي توضيحي (illustration)';
+    case 'تلقائي':
+    default:
+      return undefined;
+  }
 }
 
 /**
