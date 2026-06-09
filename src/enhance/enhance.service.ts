@@ -9,11 +9,26 @@ import { PROMPT_ENHANCER } from './enhance.types';
 import type { EnhanceRequest, PromptEnhancer } from './enhance.types';
 
 /** Toolbar keys worth feeding the rewriter as light context (Arabic labels). */
-const CONTEXT_LABELS: Record<string, string> = {
-  format: 'الصيغة',
-  imageType: 'النمط',
-  ratio: 'الأبعاد',
+type Lang = 'ar' | 'en';
+
+/** Toolbar keys fed as light context, labelled per output language. */
+const CONTEXT_KEYS = ['format', 'imageType', 'ratio'] as const;
+const CONTEXT_LABELS: Record<Lang, Record<string, string>> = {
+  ar: { format: 'الصيغة', imageType: 'النمط', ratio: 'الأبعاد' },
+  en: { format: 'Format', imageType: 'Style', ratio: 'Aspect ratio' },
 };
+
+/**
+ * Pin the output language deterministically by the dominant script, rather than
+ * relying on the model to infer it (which a short/instructional English prompt
+ * lost to the Arabic instructions). Empty/neutral → Arabic (the app default).
+ */
+function detectLanguage(text: string): Lang {
+  const arabic = (text.match(/[؀-ۿ]/g) ?? []).length;
+  const latin = (text.match(/[A-Za-z]/g) ?? []).length;
+  if (arabic === 0 && latin === 0) return 'ar';
+  return arabic >= latin ? 'ar' : 'en';
+}
 
 @Injectable()
 export class EnhanceService {
@@ -40,8 +55,10 @@ export class EnhanceService {
       );
     }
 
-    const system = this.systemPrompt(req.mode);
-    const user = this.userMessage(prompt, productName, req.options);
+    // Detect from the draft (or the product name when the draft is empty).
+    const lang = detectLanguage(prompt || productName || '');
+    const system = this.systemPrompt(req.mode, lang);
+    const user = this.userMessage(lang, prompt, productName, req.options);
     try {
       const raw = await this.enhancer.enhance(system, user);
       return this.clean(raw);
@@ -53,8 +70,26 @@ export class EnhanceService {
     }
   }
 
-  /** Mode-aware system instruction. Mirrors the user's language; stays on topic. */
-  private systemPrompt(mode: 'image' | 'video'): string {
+  /**
+   * Mode-aware system instruction, written ENTIRELY in the target language so
+   * nothing biases the output language back (the whole prompt is one language).
+   */
+  private systemPrompt(mode: 'image' | 'video', lang: Lang): string {
+    if (lang === 'en') {
+      const medium = mode === 'video' ? 'a short ad video' : 'an ad image';
+      const motion =
+        mode === 'video'
+          ? ', plus camera movement, pacing and transitions suited to a short video'
+          : '';
+      return [
+        'You are an expert at writing visual prompts for product ads.',
+        `Rewrite the user's description into one rich, precise prompt to generate ${medium}.`,
+        'IMPORTANT: write the entire output in English only.',
+        `Stay strictly on the user's subject and the named product; enrich the details (scene, lighting, composition, angle, mood${motion}) without changing the idea or adding unrelated elements.`,
+        'Do not invent prices, claims or brand names.',
+        'Return only the prompt (one or two sentences, ~45 words max) with no preamble, headings or quotes.',
+      ].join(' ');
+    }
     const medium = mode === 'video' ? 'فيديو إعلاني قصير' : 'صورة إعلانية';
     const motion =
       mode === 'video'
@@ -63,31 +98,33 @@ export class EnhanceService {
     return [
       'أنت خبير في كتابة أوصاف بصرية لإعلانات المنتجات.',
       `أعد صياغة وصف المستخدم ليصبح وصفًا واحدًا غنيًا ودقيقًا لتوليد ${medium} احترافي.`,
-      // Follow the input language — do NOT force Arabic.
-      'اكتب الناتج بنفس لغة وصف المستخدم تمامًا: إن كتب بالعربية فاكتب بالعربية، وإن كتب بالإنجليزية فاكتب بالإنجليزية، وهكذا لأي لغة. إن كان الوصف فارغًا فاكتب بالعربية.',
-      // Stay strictly on the user's subject.
+      'مهم: اكتب الناتج بالكامل بالعربية فقط.',
       `ابقَ ضمن موضوع المستخدم والمنتج المذكور تمامًا، وأَثرِ التفاصيل (المشهد، الإضاءة، التكوين، الزاوية، المزاج${motion}) دون تغيير الفكرة أو إضافة عناصر لا علاقة لها بالموضوع.`,
       'لا تخترع أسعارًا أو ادعاءات أو علامات تجارية.',
       'أعد الوصف فقط (جملة أو جملتين، في حدود ٤٥ كلمة) دون مقدمات أو عناوين أو علامات اقتباس.',
     ].join(' ');
   }
 
-  /** Compact user message: the draft + a few context lines. */
+  /** Compact user message: the draft + a few context lines, labelled in `lang`. */
   private userMessage(
+    lang: Lang,
     prompt: string,
     productName: string | undefined,
     options: Record<string, string> | undefined,
   ): string {
+    const en = lang === 'en';
     const lines: string[] = [];
     lines.push(
       prompt
-        ? `الوصف: ${prompt}`
-        : 'الوصف: (لا يوجد — اكتب وصفًا مناسبًا للمنتج)',
+        ? `${en ? 'Description' : 'الوصف'}: ${prompt}`
+        : en
+          ? 'Description: (none — write a fitting ad description for the product)'
+          : 'الوصف: (لا يوجد — اكتب وصفًا مناسبًا للمنتج)',
     );
-    if (productName) lines.push(`المنتج: ${productName}`);
-    for (const [key, label] of Object.entries(CONTEXT_LABELS)) {
+    if (productName) lines.push(`${en ? 'Product' : 'المنتج'}: ${productName}`);
+    for (const key of CONTEXT_KEYS) {
       const value = options?.[key]?.trim();
-      if (value) lines.push(`${label}: ${value}`);
+      if (value) lines.push(`${CONTEXT_LABELS[lang][key]}: ${value}`);
     }
     return lines.join('\n');
   }
