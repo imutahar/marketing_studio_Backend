@@ -103,7 +103,6 @@ export class ByteplusProvider implements GenerationProvider {
         imageSizeForFormat(ctx.request.options.format) ??
         this.config.get<string>('BYTEPLUS_IMAGE_SIZE') ??
         '2K',
-      sequential_image_generation: 'disabled',
       watermark: false,
       stream: false,
     };
@@ -114,14 +113,30 @@ export class ByteplusProvider implements GenerationProvider {
     if (refs.length === 1) body.image = refs[0];
     else if (refs.length > 1) body.image = refs;
 
+    // Variations: ask for a SET of related images in one call. Seedream caps
+    // input references + generated images at 15, so clamp accordingly.
+    const requested = imageVariationCount(ctx.request.options.variations);
+    const maxImages = Math.max(1, Math.min(requested, 15 - refs.length));
+    if (maxImages > 1) {
+      body.sequential_image_generation = 'auto';
+      body.sequential_image_generation_options = { max_images: maxImages };
+    } else {
+      body.sequential_image_generation = 'disabled';
+    }
+
     const res = await this.post<ImageGenerationResponse>(
       `${baseUrl}/images/generations`,
       apiKey,
       body,
     );
-    const url = res.data?.[0]?.url;
-    if (!url) throw new Error('BytePlus image generation returned no url.');
-    return [{ type: 'image', url }];
+    // 'auto' returns a set; map every returned url to an output. The model may
+    // return fewer than requested — render whatever it produced.
+    const urls = (res.data ?? [])
+      .map((d) => d.url)
+      .filter((u): u is string => !!u);
+    if (urls.length === 0)
+      throw new Error('BytePlus image generation returned no url.');
+    return urls.map((url) => ({ type: 'image', url }));
   }
 
   // ── Video (async task + poll) ──────────────────────────────────────────
@@ -405,11 +420,14 @@ export class ByteplusProvider implements GenerationProvider {
   /** Image prompt enriched with the selected options (language, format, …). */
   private composeImagePrompt(ctx: GenerationContext): string {
     const o = ctx.request.options;
-    // Option values become style descriptors (imageType, …) EXCEPT:
-    //  - "language" → a clear text-rendering instruction (below)
-    //  - "format"   → drives the real image size/aspect, not prompt text
+    // Option values become style descriptors (imageType, …) EXCEPT keys that
+    // drive real parameters rather than prompt text:
+    //  - "language"   → a clear text-rendering instruction (below)
+    //  - "format"     → the real image size/aspect
+    //  - "variations" → the number of images requested
+    const structuralKeys = new Set(['language', 'format', 'variations']);
     const descriptors = Object.entries(o)
-      .filter(([key]) => key !== 'language' && key !== 'format')
+      .filter(([key]) => !structuralKeys.has(key))
       .map(([, value]) => value);
 
     const languageRule = imageTextLanguageRule(o.language);
@@ -515,6 +533,23 @@ function delay(ms: number): Promise<void> {
 function styleText(prompt: string, descriptors: string[]): string {
   const extras = descriptors.filter((d) => d && d.trim().length > 0);
   return extras.length ? `${prompt} — ${extras.join('، ')}` : prompt;
+}
+
+/**
+ * How many image variations the "عدد الصور" select asks for. Seedream returns a
+ * SET of related images in one call via `sequential_image_generation: auto`;
+ * each generated image bills separately. Unknown/missing → 1 (single image).
+ */
+function imageVariationCount(value: string | undefined): number {
+  switch (value) {
+    case 'صورتان':
+      return 2;
+    case '٤ صور':
+      return 4;
+    case 'صورة واحدة':
+    default:
+      return 1;
+  }
 }
 
 /**
