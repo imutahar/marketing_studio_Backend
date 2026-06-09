@@ -35,6 +35,26 @@ describe('EnhanceService', () => {
     expect(enhance).toHaveBeenCalledTimes(1);
   });
 
+  it('builds an English-only instruction for an instructional English prompt', async () => {
+    const enhance = jest.fn().mockResolvedValue('A beach ad at golden hour');
+    const svc = makeService({ enhance });
+    await svc.enhance({
+      prompt: 'get me a good ad for the beach with offer 1 to 1',
+      mode: 'video',
+    });
+    const [system] = enhance.mock.calls[0] as [string, string];
+    expect(system).toContain('English only');
+    expect(system).not.toMatch(/[؀-ۿ]/); // no Arabic anywhere in the instruction
+  });
+
+  it('keeps Arabic for an Arabic prompt', async () => {
+    const enhance = jest.fn().mockResolvedValue('مشهد شاطئي');
+    const svc = makeService({ enhance });
+    await svc.enhance({ prompt: 'إعلان للشاطئ', mode: 'video' });
+    const [system] = enhance.mock.calls[0] as [string, string];
+    expect(system).toContain('بالعربية');
+  });
+
   it('passes English output through and strips an English label prefix', async () => {
     const enhance = jest
       .fn()
