@@ -96,7 +96,13 @@ export class ByteplusProvider implements GenerationProvider {
       model,
       prompt: this.composeImagePrompt(ctx),
       response_format: 'url',
-      size: this.config.get<string>('BYTEPLUS_IMAGE_SIZE') ?? '2K',
+      // The "format" select drives the real aspect ratio (Instagram post/story,
+      // Facebook, banner). Falls back to the configured default size when no
+      // recognized format is chosen.
+      size:
+        imageSizeForFormat(ctx.request.options.format) ??
+        this.config.get<string>('BYTEPLUS_IMAGE_SIZE') ??
+        '2K',
       sequential_image_generation: 'disabled',
       watermark: false,
       stream: false,
@@ -399,10 +405,11 @@ export class ByteplusProvider implements GenerationProvider {
   /** Image prompt enriched with the selected options (language, format, …). */
   private composeImagePrompt(ctx: GenerationContext): string {
     const o = ctx.request.options;
-    // Every option value is a style descriptor (format, imageType, …) EXCEPT
-    // "language", which becomes a clear text-rendering instruction.
+    // Option values become style descriptors (imageType, …) EXCEPT:
+    //  - "language" → a clear text-rendering instruction (below)
+    //  - "format"   → drives the real image size/aspect, not prompt text
     const descriptors = Object.entries(o)
-      .filter(([key]) => key !== 'language')
+      .filter(([key]) => key !== 'language' && key !== 'format')
       .map(([, value]) => value);
 
     const languageRule = imageTextLanguageRule(o.language);
@@ -508,6 +515,28 @@ function delay(ms: number): Promise<void> {
 function styleText(prompt: string, descriptors: string[]): string {
   const extras = descriptors.filter((d) => d && d.trim().length > 0);
   return extras.length ? `${prompt} — ${extras.join('، ')}` : prompt;
+}
+
+/**
+ * Map the image "format" (platform target) to a real Seedream `size` (WxH), so
+ * picking "ستوري انستجرام" actually produces a 9:16 image instead of the default
+ * square. Dimensions are clean aspect ratios kept inside Seedream's bounds
+ * (total pixels [1280×720, 4096×4096], each side ≤ 4096). Returns undefined for
+ * an unknown/missing format so the caller falls back to the configured default.
+ */
+function imageSizeForFormat(value: string | undefined): string | undefined {
+  switch (value) {
+    case 'صورة انستجرام': // Instagram post — 1:1 square
+      return '2048x2048';
+    case 'ستوري انستجرام': // Instagram/Snap story — 9:16 vertical
+      return '2304x4096';
+    case 'منشور فيسبوك': // Facebook feed ad — 4:5 portrait (best-performing feed ratio)
+      return '2048x2560';
+    case 'بنر إعلاني': // Wide ad banner — 16:9 landscape
+      return '4096x2304';
+    default:
+      return undefined;
+  }
 }
 
 /**
