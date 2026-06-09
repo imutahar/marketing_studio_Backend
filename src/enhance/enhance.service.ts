@@ -53,20 +53,21 @@ export class EnhanceService {
     }
   }
 
-  /** Mode-aware Arabic system instruction. */
+  /** Mode-aware system instruction. Mirrors the user's language; stays on topic. */
   private systemPrompt(mode: 'image' | 'video'): string {
     const medium = mode === 'video' ? 'فيديو إعلاني قصير' : 'صورة إعلانية';
     const motion =
       mode === 'video'
-        ? ' أضف أيضًا حركة الكاميرا والإيقاع والانتقالات بما يناسب فيديو قصير.'
+        ? '، وحركة الكاميرا والإيقاع والانتقالات بما يناسب فيديو قصير'
         : '';
     return [
       'أنت خبير في كتابة أوصاف بصرية لإعلانات المنتجات.',
       `أعد صياغة وصف المستخدم ليصبح وصفًا واحدًا غنيًا ودقيقًا لتوليد ${medium} احترافي.`,
-      'اكتب بالعربية الفصحى فقط.',
-      'أضف تفاصيل المشهد والإضاءة والتكوين والزاوية والمزاج بما يخدم المنتج.' +
-        motion,
-      'حافظ على نيّة المستخدم والمنتج المذكور، ولا تخترع أسعارًا أو ادعاءات أو علامات تجارية.',
+      // Follow the input language — do NOT force Arabic.
+      'اكتب الناتج بنفس لغة وصف المستخدم تمامًا: إن كتب بالعربية فاكتب بالعربية، وإن كتب بالإنجليزية فاكتب بالإنجليزية، وهكذا لأي لغة. إن كان الوصف فارغًا فاكتب بالعربية.',
+      // Stay strictly on the user's subject.
+      `ابقَ ضمن موضوع المستخدم والمنتج المذكور تمامًا، وأَثرِ التفاصيل (المشهد، الإضاءة، التكوين، الزاوية، المزاج${motion}) دون تغيير الفكرة أو إضافة عناصر لا علاقة لها بالموضوع.`,
+      'لا تخترع أسعارًا أو ادعاءات أو علامات تجارية.',
       'أعد الوصف فقط (جملة أو جملتين، في حدود ٤٥ كلمة) دون مقدمات أو عناوين أو علامات اقتباس.',
     ].join(' ');
   }
@@ -91,9 +92,11 @@ export class EnhanceService {
     return lines.join('\n');
   }
 
-  /** Strip wrapping quotes and a leading "الوصف:" the model may echo back. */
+  /** Strip wrapping quotes and a leading label (Arabic or English) echoed back. */
   private clean(text: string): string {
-    let out = text.trim().replace(/^الوصف\s*[:：]\s*/u, '');
+    let out = text
+      .trim()
+      .replace(/^(?:الوصف|الناتج|description|prompt)\s*[:：]\s*/iu, '');
     out = out.replace(/^["'«“”]+|["'«“”]+$/gu, '').trim();
     return out;
   }

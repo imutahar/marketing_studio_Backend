@@ -35,6 +35,15 @@ describe('EnhanceService', () => {
     expect(enhance).toHaveBeenCalledTimes(1);
   });
 
+  it('passes English output through and strips an English label prefix', async () => {
+    const enhance = jest
+      .fn()
+      .mockResolvedValue('Prompt: "A luxury perfume bottle in golden light"');
+    const svc = makeService({ enhance });
+    const out = await svc.enhance({ prompt: 'perfume ad', mode: 'image' });
+    expect(out).toBe('A luxury perfume bottle in golden light');
+  });
+
   it('allows an empty prompt when a product is attached', async () => {
     const enhance = jest.fn().mockResolvedValue('لقطة احترافية للمنتج');
     const svc = makeService({ enhance });
