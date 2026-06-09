@@ -202,7 +202,8 @@ export class GenerationService {
         : rawOutputs;
 
       this.store.update(jobId, { status: 'succeeded', outputs });
-      this.usage.consume(this.tokenCost(job)); // only successful jobs cost tokens
+      // only successful jobs cost tokens; images bill per produced variation
+      this.usage.consume(this.tokenCost(job, outputs));
       if (job.projectId) {
         this.projects.recordGeneration(job.projectId, outputs[0]?.url);
       }
@@ -444,14 +445,18 @@ export class GenerationService {
     this.dailyUsage.count += 1;
   }
 
-  /** Token cost of a job: images flat, videos scale with duration. */
-  private tokenCost(job: Job): number {
+  /**
+   * Token cost of a job: videos scale with duration; images bill per produced
+   * image (variations return a set), falling back to a single image.
+   */
+  private tokenCost(job: Job, outputs?: GenerationOutput[]): number {
     if (job.request.mode === 'video') {
       const seconds =
         parseDurationSeconds(job.request.options.duration) ??
         DEFAULT_VIDEO_SECONDS;
       return seconds * VIDEO_TOKENS_PER_SECOND;
     }
-    return IMAGE_TOKEN_COST;
+    const count = Math.max(1, outputs?.length ?? 1);
+    return IMAGE_TOKEN_COST * count;
   }
 }
