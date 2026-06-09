@@ -398,9 +398,16 @@ export class ByteplusProvider implements GenerationProvider {
 
   /** Image prompt enriched with the selected options (language, format, …). */
   private composeImagePrompt(ctx: GenerationContext): string {
-    // Image mode has no structured param keys today, so every option VALUE is a
-    // style descriptor (language, format, …).
-    const descriptors = Object.values(ctx.request.options);
+    const o = ctx.request.options;
+    // Every option value is a style descriptor (format, imageType, …) EXCEPT
+    // "language", which becomes a clear text-rendering instruction.
+    const descriptors = Object.entries(o)
+      .filter(([key]) => key !== 'language')
+      .map(([, value]) => value);
+
+    const languageRule = imageTextLanguageRule(o.language);
+    if (languageRule) descriptors.push(languageRule);
+
     if (ctx.request.negativePrompt)
       descriptors.push(`تجنّب: ${ctx.request.negativePrompt}`);
     return styleText(ctx.request.prompt, descriptors);
@@ -501,4 +508,23 @@ function delay(ms: number): Promise<void> {
 function styleText(prompt: string, descriptors: string[]): string {
   const extras = descriptors.filter((d) => d && d.trim().length > 0);
   return extras.length ? `${prompt} — ${extras.join('، ')}` : prompt;
+}
+
+/**
+ * Turn the image "language" option into a clear text-rendering instruction so
+ * the model actually honors it (a bare "نص عربي" token in the prompt is a weak
+ * signal). "بدون نص" suppresses on-image text entirely — often the cleanest
+ * look for product ads, and it sidesteps unreliable Arabic text rendering.
+ */
+function imageTextLanguageRule(value: string | undefined): string | undefined {
+  switch (value) {
+    case 'نص عربي':
+      return 'أي نص يظهر في الصورة يجب أن يكون باللغة العربية وواضحًا وصحيحًا';
+    case 'نص إنجليزي':
+      return 'any text shown in the image must be in clear, correct English';
+    case 'بدون نص':
+      return 'بدون أي نصوص أو كتابات أو حروف في الصورة';
+    default:
+      return undefined;
+  }
 }
