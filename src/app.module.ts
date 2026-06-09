@@ -7,6 +7,7 @@ import { AppService } from './app.service';
 import { GenerationModule } from './generation/generation.module';
 import { UsageModule } from './usage/usage.module';
 import { ExtractModule } from './extract/extract.module';
+import { EnhanceModule } from './enhance/enhance.module';
 import { AdReferenceModule } from './ad-reference/ad-reference.module';
 import { ProjectsModule } from './projects/projects.module';
 import { AppPasswordGuard } from './common/app-password.guard';
@@ -19,6 +20,7 @@ import { AppPasswordGuard } from './common/app-password.guard';
     GenerationModule,
     UsageModule,
     ExtractModule,
+    EnhanceModule,
     AdReferenceModule,
     ProjectsModule,
   ],
