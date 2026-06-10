@@ -74,6 +74,16 @@ export class GenerationService {
     );
   }
 
+  /**
+   * Provider capabilities the composer needs up front — currently whether the
+   * active video model supports the 480p draft preview (Seedance 2.0 doesn't),
+   * so the UI can hide the draft toggle instead of showing a no-op.
+   */
+  capabilities(): { draft: boolean } {
+    const provider = this.registry.resolve('text-to-video');
+    return { draft: provider.supportsDraft?.() ?? false };
+  }
+
   /** Create a job and kick off generation asynchronously (clients poll status). */
   create(dto: CreateGenerationDto, ownerId: string): Job {
     this.enforceDailyCap();

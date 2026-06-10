@@ -44,8 +44,10 @@ const MAX_IMAGE_REFERENCES = 14;
  *                                GET  {base}/contents/generations/tasks/{id}
  *
  * Verified against the ModelArk API:
- *   video model: seedance-1-5-pro-251215 (params via --flags in the text)
+ *   video model: dreamina-seedance-2-0-260128 (Dreamina Seedance 2.0; structured params)
  *   image model: seedream-5-0-260128
+ * NOTE: the 480p draft → promote (draft_task) flow is a Seedance 1.x feature;
+ * Seedance 2.0 doesn't expose it, so supportsDraft() is model-gated below.
  * Both are env-overridable (BYTEPLUS_VIDEO_MODEL / BYTEPLUS_IMAGE_MODEL); only
  * BYTEPLUS_API_KEY is required.
  *
@@ -180,7 +182,10 @@ export class ByteplusProvider implements GenerationProvider {
 
   // ── Draft mode (480p preview → promote → full render) ──────────────────
   supportsDraft(): boolean {
-    return true;
+    // The 480p draft → promote (draft_task) flow is a Seedance 1.x capability.
+    // Seedance 2.0 (dreamina-seedance-2-0-*) doesn't expose it, so a draft
+    // request on 2.0 falls back to a normal full render instead of erroring.
+    return /seedance-1/i.test(this.resolveModel('video'));
   }
 
   /**
@@ -315,7 +320,7 @@ export class ByteplusProvider implements GenerationProvider {
     if (kind === 'video') {
       return (
         this.config.get<string>('BYTEPLUS_VIDEO_MODEL') ??
-        'seedance-1-5-pro-251215'
+        'dreamina-seedance-2-0-260128'
       );
     }
     return (
