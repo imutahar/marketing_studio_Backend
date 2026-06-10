@@ -79,11 +79,12 @@ export class GenerationService {
    * active video model supports the 480p draft preview (Seedance 2.0 doesn't),
    * so the UI can hide the draft toggle instead of showing a no-op.
    */
-  capabilities(): { draft: boolean; cameraFixed: boolean } {
+  capabilities(): { draft: boolean; cameraFixed: boolean; fastVideo: boolean } {
     const provider = this.registry.resolve('text-to-video');
     return {
       draft: provider.supportsDraft?.() ?? false,
       cameraFixed: provider.supportsCameraFixed?.() ?? false,
+      fastVideo: provider.supportsFastVideo?.() ?? false,
     };
   }
 
@@ -428,6 +429,7 @@ export class GenerationService {
       cameraFixed: dto.cameraFixed,
       generateAudio: dto.generateAudio,
       draft: dto.draft,
+      fast: dto.fast,
     };
   }
 
