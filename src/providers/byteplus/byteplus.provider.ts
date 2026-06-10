@@ -152,8 +152,19 @@ export class ByteplusProvider implements GenerationProvider {
     const content: TaskContentPart[] = [
       { type: 'text', text: this.composeVideoPrompt(ctx) },
     ];
+    // Seedance 2.0 best practice: tag product/character images as
+    // `reference_image` (subject references) so the model keeps them consistent
+    // while generating the scene, instead of guessing an untagged image's role.
+    // Older Seedance (1.x) doesn't use roles — send untagged there.
+    const referenceRole: ImageRole | undefined = /seedance-2/i.test(model)
+      ? 'reference_image'
+      : undefined;
     for (const url of this.referenceImages(ctx)) {
-      content.push({ type: 'image_url', image_url: { url } });
+      content.push(
+        referenceRole
+          ? { type: 'image_url', image_url: { url }, role: referenceRole }
+          : { type: 'image_url', image_url: { url } },
+      );
     }
 
     // Resolution/ratio/duration/seed/camera_fixed go in the structured task
@@ -185,6 +196,11 @@ export class ByteplusProvider implements GenerationProvider {
     // The 480p draft → promote (draft_task) flow is a Seedance 1.x capability.
     // Seedance 2.0 (dreamina-seedance-2-0-*) doesn't expose it, so a draft
     // request on 2.0 falls back to a normal full render instead of erroring.
+    return /seedance-1/i.test(this.resolveModel('video'));
+  }
+
+  supportsCameraFixed(): boolean {
+    // camera_fixed is a Seedance 1.x param; not documented for 2.0.
     return /seedance-1/i.test(this.resolveModel('video'));
   }
 
@@ -415,7 +431,9 @@ export class ByteplusProvider implements GenerationProvider {
     if (o.ratio && ALLOWED_VIDEO_RATIOS.has(o.ratio)) params.ratio = o.ratio;
     const res = o.resolution?.toLowerCase();
     if (res && ALLOWED_VIDEO_RESOLUTIONS.has(res)) params.resolution = res;
-    if (ctx.request.cameraFixed !== undefined) {
+    // camera_fixed is a Seedance 1.x param; it's not documented for 2.0, so only
+    // send it to models that support it (avoids an unknown-param rejection).
+    if (ctx.request.cameraFixed !== undefined && this.supportsCameraFixed()) {
       params.camera_fixed = ctx.request.cameraFixed;
     }
     if (ctx.request.seed !== undefined) params.seed = ctx.request.seed;
@@ -534,9 +552,17 @@ interface ImageGenerationResponse {
   data?: { url?: string }[];
 }
 
+/** Seedance 2.0 reference roles (the model treats untagged images ambiguously). */
+type ImageRole =
+  | 'first_frame'
+  | 'last_frame'
+  | 'reference_image'
+  | 'reference_video'
+  | 'reference_audio';
+
 type TaskContentPart =
   | { type: 'text'; text: string }
-  | { type: 'image_url'; image_url: { url: string } }
+  | { type: 'image_url'; image_url: { url: string }; role?: ImageRole }
   | { type: 'draft_task'; draft_task: { id: string } };
 
 function delay(ms: number): Promise<void> {

@@ -27,6 +27,9 @@ export interface GenerationProvider {
   /** Whether this provider supports the cheap 480p draft → promote flow. */
   supportsDraft?(): boolean;
 
+  /** Whether the active video model supports the `camera_fixed` param. */
+  supportsCameraFixed?(): boolean;
+
   /**
    * Create a 480p draft and resolve once it has succeeded. Returns the draft
    * task id (used later to promote) plus the preview video url.
