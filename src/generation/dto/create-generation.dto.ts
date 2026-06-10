@@ -81,4 +81,9 @@ export class CreateGenerationDto {
   @IsOptional()
   @IsBoolean()
   draft?: boolean;
+
+  /** Video only: use the faster, cheaper model variant (lower fidelity). */
+  @IsOptional()
+  @IsBoolean()
+  fast?: boolean;
 }

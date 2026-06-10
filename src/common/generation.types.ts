@@ -41,6 +41,11 @@ export interface GenerationRequest {
    * draft_ready for approval before the full render. Seedance 1.5-Pro only.
    */
   draft?: boolean;
+  /**
+   * Video only: use the faster, cheaper "fast" model variant (slightly lower
+   * fidelity) for quick iteration. Default off (standard = highest quality).
+   */
+  fast?: boolean;
 }
 
 /** What kind of generation this is — drives model/provider selection. */

@@ -147,7 +147,8 @@ export class ByteplusProvider implements GenerationProvider {
     baseUrl: string,
     apiKey: string,
   ): Promise<GenerationOutput[]> {
-    const model = this.resolveModel('video');
+    // "Fast" picks the cheaper, quicker variant (lower fidelity) for iteration.
+    const model = this.resolveVideoModel(ctx.request.fast === true);
 
     const content: TaskContentPart[] = [
       { type: 'text', text: this.composeVideoPrompt(ctx) },
@@ -202,6 +203,30 @@ export class ByteplusProvider implements GenerationProvider {
   supportsCameraFixed(): boolean {
     // camera_fixed is a Seedance 1.x param; not documented for 2.0.
     return /seedance-1/i.test(this.resolveModel('video'));
+  }
+
+  supportsFastVideo(): boolean {
+    // A fast variant is available if explicitly configured, or derivable from a
+    // Seedance 2.0 model id (…-fast-…).
+    return (
+      !!this.config.get<string>('BYTEPLUS_VIDEO_MODEL_FAST') ||
+      !!fastVariantOf(this.resolveModel('video'))
+    );
+  }
+
+  /**
+   * Resolve the video model, honoring the per-request "fast" preference. Fast
+   * uses BYTEPLUS_VIDEO_MODEL_FAST when set, else the derived `-fast-` variant
+   * of a Seedance 2.0 id; falls back to the standard model if none exists.
+   */
+  private resolveVideoModel(fast: boolean): string {
+    const standard = this.resolveModel('video');
+    if (!fast) return standard;
+    return (
+      this.config.get<string>('BYTEPLUS_VIDEO_MODEL_FAST') ??
+      fastVariantOf(standard) ??
+      standard
+    );
   }
 
   /**
@@ -567,6 +592,12 @@ type TaskContentPart =
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** dreamina-seedance-2-0-260128 → dreamina-seedance-2-0-fast-260128. */
+function fastVariantOf(model: string): string | undefined {
+  const m = /^(dreamina-seedance-2-0)-(\d{4,})$/.exec(model);
+  return m ? `${m[1]}-fast-${m[2]}` : undefined;
 }
 
 /** Append non-empty style descriptors (نوع الفيديو, language, …) to a prompt. */
