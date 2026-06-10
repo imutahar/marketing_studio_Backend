@@ -139,6 +139,12 @@ export class GenerationService {
     return job;
   }
 
+  /** Delete a generation the caller owns (owner-scoped). */
+  remove(id: string, ownerId: string): void {
+    this.get(id, ownerId); // validates ownership, throws 404 otherwise
+    this.store.remove(id);
+  }
+
   list(ownerId: string): Job[] {
     return this.store.list().filter((j) => j.ownerId === ownerId);
   }

@@ -50,6 +50,11 @@ export class JobStore {
     );
   }
 
+  /** Remove a job. Returns whether it existed. */
+  remove(id: string): boolean {
+    return this.jobs.delete(id);
+  }
+
   /** Evict the oldest jobs until the map is within MAX_JOBS. Map preserves
    * insertion order, so the first key is the oldest.
    *
