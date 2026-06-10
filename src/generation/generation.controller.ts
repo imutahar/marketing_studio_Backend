@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -56,5 +57,12 @@ export class GenerationController {
     @CurrentUser() ownerId: string,
   ) {
     return this.service.assignProject(id, dto.projectId, ownerId);
+  }
+
+  /** Delete a generation the caller owns. Returns 204. */
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  remove(@Param('id') id: string, @CurrentUser() ownerId: string) {
+    return this.service.remove(id, ownerId);
   }
 }
