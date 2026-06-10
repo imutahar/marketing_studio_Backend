@@ -206,12 +206,11 @@ export class ByteplusProvider implements GenerationProvider {
   }
 
   supportsFastVideo(): boolean {
-    // A fast variant is available if explicitly configured, or derivable from a
-    // Seedance 2.0 model id (…-fast-…).
-    return (
-      !!this.config.get<string>('BYTEPLUS_VIDEO_MODEL_FAST') ||
-      !!fastVariantOf(this.resolveModel('video'))
-    );
+    // Gated on an explicit env flag rather than auto-deriving, because the fast
+    // model needs separate activation in the Ark Console — we only surface the
+    // toggle once BYTEPLUS_VIDEO_MODEL_FAST is set (after it's been activated),
+    // so merchants never hit a "ModelNotOpen" error from a derived id.
+    return !!this.config.get<string>('BYTEPLUS_VIDEO_MODEL_FAST');
   }
 
   /**
