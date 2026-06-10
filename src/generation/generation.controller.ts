@@ -29,6 +29,13 @@ export class GenerationController {
     return this.service.list(ownerId);
   }
 
+  /** Provider capabilities for the composer (e.g. draft support). Declared
+      before the `:id` route so it isn't swallowed by the wildcard. */
+  @Get('capabilities')
+  capabilities() {
+    return this.service.capabilities();
+  }
+
   @Get(':id')
   get(@Param('id') id: string, @CurrentUser() ownerId: string) {
     return this.service.get(id, ownerId);
