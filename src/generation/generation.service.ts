@@ -145,6 +145,18 @@ export class GenerationService {
     this.store.remove(id);
   }
 
+  /**
+   * Cancel an in-flight generation. The background run() checks this status
+   * before (and after) the provider call and skips persisting/billing, so a
+   * cancelled job never charges the user. No-op for already-terminal jobs.
+   */
+  cancel(id: string, ownerId: string): void {
+    const job = this.get(id, ownerId);
+    if (job.status === 'queued' || job.status === 'processing') {
+      this.store.update(id, { status: 'cancelled' });
+    }
+  }
+
   list(ownerId: string): Job[] {
     return this.store.list().filter((j) => j.ownerId === ownerId);
   }
@@ -201,6 +213,9 @@ export class GenerationService {
     // are still waiting stay 'queued' (making the status meaningful).
     await this.limiter.acquire();
     try {
+      // Cancelled while still queued → skip the paid provider call entirely.
+      // (return still runs the finally below, releasing the slot.)
+      if (this.store.get(jobId)?.status === 'cancelled') return;
       this.store.update(jobId, { status: 'processing' });
       // INPUTS: ModelArk needs publicly reachable image URLs. Merchant uploads
       // arrive as base64 data URIs, so re-host them on Blob (best-effort) and
@@ -214,6 +229,9 @@ export class GenerationService {
         capability: job.capability,
         request: job.request,
       });
+
+      // Cancelled while the provider ran → discard the result, don't bill.
+      if (this.store.get(jobId)?.status === 'cancelled') return;
 
       // OUTPUTS: BytePlus URLs expire (~24h). Re-host each on Blob so the ad
       // library stays durable; on any failure the original URL is preserved.

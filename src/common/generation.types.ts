@@ -8,7 +8,8 @@ export type JobStatus =
   | 'processing'
   | 'draft_ready'
   | 'succeeded'
-  | 'failed';
+  | 'failed'
+  | 'cancelled';
 
 export type AttachmentKind = 'product' | 'character' | 'image';
 

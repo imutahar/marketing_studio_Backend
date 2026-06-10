@@ -59,6 +59,13 @@ export class GenerationController {
     return this.service.assignProject(id, dto.projectId, ownerId);
   }
 
+  /** Cancel an in-flight generation (won't bill). Returns 204. */
+  @Post(':id/cancel')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  cancel(@Param('id') id: string, @CurrentUser() ownerId: string) {
+    return this.service.cancel(id, ownerId);
+  }
+
   /** Delete a generation the caller owns. Returns 204. */
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
